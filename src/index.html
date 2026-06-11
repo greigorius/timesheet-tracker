@@ -456,18 +456,13 @@ td.dim{color:var(--muted)}
       <input class="fi" type="url" id="cfgWrite" placeholder="https://hook.eu1.make.com/write/...">
     </div>
     <div class="fg">
-      <div class="fl">Notion Integration Token</div>
-      <div class="fd">Read-only token for pulling import log and hours data into this cockpit.</div>
-      <input class="fi" type="password" id="cfgToken" placeholder="ntn_...">
-    </div>
-    <div class="fg">
       <div class="fl">Timesheets DB ID</div>
       <input class="fi" type="text" id="cfgDb" placeholder="197210e4-582e-8087-81be-000b8525577a">
     </div>
     <div class="fg">
       <div class="fl">API Proxy URL</div>
-      <div class="fd">Route Notion reads through a small server-side proxy to avoid CORS. Leave blank to use demo data.</div>
-      <input class="fi" type="url" id="cfgProxy" placeholder="https://your-hub.netlify.app/api/notion">
+      <div class="fd">Server-side proxy for Notion reads. Defaults to the built-in Netlify function — only change if self-hosting elsewhere.</div>
+      <input class="fi" type="url" id="cfgProxy" placeholder="/.netlify/functions/notion-proxy">
     </div>
   </div>
   <div class="drw-f">
@@ -482,16 +477,21 @@ td.dim{color:var(--muted)}
 // ─────────────────────────────────────────────────────────
 // CONFIG & STORAGE
 // ─────────────────────────────────────────────────────────
+const DEFAULT_PROXY = '/.netlify/functions/notion-proxy';
 let cfg = {
-  scanUrl:'', writeUrl:'', notionToken:'',
-  dbId:'197210e4-582e-8087-81be-000b8525577a', proxyUrl:''
+  scanUrl:'', writeUrl:'',
+  dbId:'197210e4-582e-8087-81be-000b8525577a',
+  proxyUrl: DEFAULT_PROXY
 };
 function loadCfg(){
   const s=localStorage.getItem('adl-ts-cfg');
   if(s){try{cfg=Object.assign(cfg,JSON.parse(s))}catch(e){}}
+  // Migrate old configs that stored a notionToken
+  delete cfg.notionToken;
+  // Default proxy if not set
+  if(!cfg.proxyUrl) cfg.proxyUrl = DEFAULT_PROXY;
   document.getElementById('cfgScan').value   = cfg.scanUrl;
   document.getElementById('cfgWrite').value  = cfg.writeUrl;
-  document.getElementById('cfgToken').value  = cfg.notionToken;
   document.getElementById('cfgDb').value     = cfg.dbId;
   document.getElementById('cfgProxy').value  = cfg.proxyUrl;
   updateConnState();
@@ -499,17 +499,16 @@ function loadCfg(){
 function saveSettings(){
   cfg.scanUrl      = document.getElementById('cfgScan').value.trim();
   cfg.writeUrl     = document.getElementById('cfgWrite').value.trim();
-  cfg.notionToken  = document.getElementById('cfgToken').value.trim();
   cfg.dbId         = document.getElementById('cfgDb').value.trim();
-  cfg.proxyUrl     = document.getElementById('cfgProxy').value.trim();
+  cfg.proxyUrl     = document.getElementById('cfgProxy').value.trim() || DEFAULT_PROXY;
   localStorage.setItem('adl-ts-cfg',JSON.stringify(cfg));
   updateConnState(); closeSettings();
   toast('Settings saved','s');
   loadData();
 }
 function updateConnState(){
-  const live = cfg.notionToken && cfg.proxyUrl;
-  const configured = cfg.scanUrl || cfg.notionToken;
+  const live = !!cfg.proxyUrl;
+  const configured = cfg.scanUrl || live;
   document.getElementById('connDot').className = 'conn-dot' + (live?' live':configured?' warn':'');
   document.getElementById('warnBanner').style.display = configured?'none':'flex';
   document.getElementById('demoTag').style.display = live?'none':'inline';
@@ -643,17 +642,20 @@ function renderFileList(files){
   const list=document.getElementById('fileList');
   if(!files.length){list.innerHTML='<div class="empty" style="padding:16px">Inbox is empty.</div>';return;}
   list.innerHTML=files.map((f,i)=>{
-    const map=mapHeaders(f.headers||[]);
-    const ok=map.missing.length===0;
-    const partial=map.missing.length<=2&&map.mapped.length>=5;
-    const badgeClass=ok?'ok':partial?'warn':'err';
-    const badgeText=ok?'✓ Compatible':partial?'⚠ Partial':'✗ Incompatible';
+    // If headers not provided by Make (unverified) — selectable but unconfirmed
+    const unverified = f.headers == null;
+    const map = unverified ? {mapped:[],missing:[]} : mapHeaders(f.headers||[]);
+    const ok      = !unverified && map.missing.length===0;
+    const partial  = !unverified && map.missing.length<=2 && map.mapped.length>=5;
+    const enabled  = ok || partial || unverified;
+    const badgeClass = unverified?'warn': ok?'ok': partial?'warn':'err';
+    const badgeText  = unverified?'? Unverified': ok?'✓ Compatible': partial?'⚠ Partial':'✗ Incompatible';
     const detailId='fd'+i;
     return `<div class="file-row" id="fr${i}" onclick="toggleFileSelect(${i},event)">
-      <input type="checkbox" id="fc${i}" ${ok||partial?'':'disabled'} onchange="onFileCheck()" onclick="event.stopPropagation()">
+      <input type="checkbox" id="fc${i}" ${enabled?'':'disabled'} onchange="onFileCheck()" onclick="event.stopPropagation()">
       <span class="file-name" title="${esc(f.name)}">${esc(f.name)}</span>
       <span class="file-meta">${esc(f.size||'')} · ${esc(f.modified||'')}</span>
-      <span class="compat-badge ${badgeClass}" onclick="toggleDetail('${detailId}',event)">${badgeText} ▾</span>
+      <span class="compat-badge ${badgeClass}" onclick="toggleDetail('${detailId}',event)">${badgeText}${unverified?'':' ▾'}</span>
     </div>
     <div class="compat-detail" id="${detailId}">
       ${map.mapped.length?'<span class="mapped">Mapped: '+map.mapped.join(', ')+'</span><br>':''}
@@ -799,13 +801,64 @@ function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
 // DATA
 // ─────────────────────────────────────────────────────────
 let allEntries=[];
-function loadData(){
-  allEntries=demoEntries();
+async function loadData(){
+  if(cfg.proxyUrl && cfg.proxyUrl !== DEFAULT_PROXY || cfg.proxyUrl === DEFAULT_PROXY){
+    try{
+      allEntries = await fetchNotionEntries();
+    }catch(e){
+      console.warn('Notion fetch failed, falling back to demo data:', e.message);
+      allEntries = demoEntries();
+    }
+  } else {
+    allEntries = demoEntries();
+  }
   assignColors();
   updateStats();
   populateFilters();
   renderView();
   applyFilters();
+}
+
+async function fetchNotionEntries(){
+  const proxy = cfg.proxyUrl || DEFAULT_PROXY;
+  const res = await fetch(proxy, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      databaseId: cfg.dbId,
+      sorts:[{property:'Date',direction:'descending'}],
+      page_size: 200
+    })
+  });
+  if(!res.ok) throw new Error('Proxy returned '+res.status);
+  const data = await res.json();
+  if(!data.results) throw new Error('Unexpected response shape');
+  return data.results.map(page => {
+    const p = page.properties || {};
+    const getProp = (names, type) => {
+      for(const n of names){
+        const prop = p[n];
+        if(!prop) continue;
+        if(type==='title') return prop.title?.[0]?.plain_text||'';
+        if(type==='rich_text') return prop.rich_text?.[0]?.plain_text||'';
+        if(type==='select') return prop.select?.name||'';
+        if(type==='number') return prop.number??null;
+        if(type==='date') return prop.date?.start||'';
+      }
+      return '';
+    };
+    return {
+      id:      page.id,
+      person:  getProp(['Person','Name','Submitter'],'title') || getProp(['Person','Name','Submitter'],'rich_text'),
+      project: getProp(['Project','Job','Scheme','Project Ref'],'rich_text') || getProp(['Project'],'title'),
+      category:getProp(['Category','Cat','Type'],'select'),
+      desc:    getProp(['Description','Notes','Desc'],'rich_text'),
+      date:    getProp(['Date','Work Date'],'date'),
+      day:     getProp(['Day','Weekday'],'select')||getProp(['Day'],'rich_text'),
+      hours:   getProp(['Hours','Hrs','Time'],'number'),
+      status:  getProp(['Import Status','Status','import_status'],'select'),
+    };
+  });
 }
 
 function updateStats(){
