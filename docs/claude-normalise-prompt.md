@@ -36,16 +36,20 @@ Map any of these source column names (case-insensitive) to the target Notion fie
 
 ## Category Normalisation
 
-Map source values to one of these allowed Notion select options:
-- **Design** — design, architecture, architectural, detailing, design work, detail design
-- **Drafting** — drafting, drawing, draughting, cad, autocad, revit, modelling, drawings
-- **Coordination** — coordination, coord, co-ordination, technical coordination, clash detection
-- **Meetings** — meetings, meeting, call, site visit, client meeting, design meeting
-- **Admin** — admin, administration, project management, pm, management, emails
-- **Site** — site, site visit, site survey, survey, on site
-- **Other** — anything that doesn't match the above
+Map source values to one of these allowed Notion select options (use exact strings):
+- **Coordination & Research** — coordination, coord, co-ordination, research, information gathering, RFI, technical query, clash detection
+- **Drawing & Modelling - Production** — production drawing, new drawing, modelling, CAD, Revit, AutoCAD, drafting, draughting, producing drawings, new model
+- **Drawing & Modelling - Revision** — revision, revising, update drawing, amend drawing, incorporating comments, design change, rev, revised
+- **Drawing & Modelling - First Issue** — first issue, issuing, packaging, issue for approval, IFA, IFC, first issue drawing
+- **Meetings** — meeting, call, video call, Teams call, client meeting, design meeting, site visit meeting, conference
+- **DM Development** — DM development, design management development, delivery strategy, design programme, BIM strategy
+- **DM Coordination** — DM coordination, design manager coordination, information management, design flow, discipline coordination
+- **DM Project Admin** — DM admin, project administration, programme, tracker, report, correspondence, DM report
+- **DM Meetings** — DM meeting, design manager meeting, DM call, management meeting
+- **Document Control** — document control, transmittal, register, file management, document register, DC
+- **Travel Time** — travel, travelling, travel time, commute to site, journey
 
-If category is blank or unrecognisable, use "Other".
+If category is blank or unrecognisable, use "Coordination & Research".
 
 ## Date Handling
 
