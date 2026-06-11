@@ -456,10 +456,6 @@ td.dim{color:var(--muted)}
       <input class="fi" type="url" id="cfgWrite" placeholder="https://hook.eu1.make.com/write/...">
     </div>
     <div class="fg">
-      <div class="fl">Timesheets DB ID</div>
-      <input class="fi" type="text" id="cfgDb" placeholder="197210e4-582e-8087-81be-000b8525577a">
-    </div>
-    <div class="fg">
       <div class="fl">API Proxy URL</div>
       <div class="fd">Server-side proxy for Notion reads. Defaults to the built-in Netlify function — only change if self-hosting elsewhere.</div>
       <input class="fi" type="url" id="cfgProxy" placeholder="/.netlify/functions/notion-proxy">
@@ -480,27 +476,24 @@ td.dim{color:var(--muted)}
 const DEFAULT_PROXY = '/.netlify/functions/notion-proxy';
 let cfg = {
   scanUrl:'', writeUrl:'',
-  dbId:'197210e4-582e-8087-81be-000b8525577a',
   proxyUrl: DEFAULT_PROXY
 };
 function loadCfg(){
   const s=localStorage.getItem('adl-ts-cfg');
   if(s){try{cfg=Object.assign(cfg,JSON.parse(s))}catch(e){}}
-  // Migrate old configs that stored a notionToken
+  // Migrate old configs that stored token/dbId in the browser
   delete cfg.notionToken;
-  // Default proxy if not set
+  delete cfg.dbId;
   if(!cfg.proxyUrl) cfg.proxyUrl = DEFAULT_PROXY;
   document.getElementById('cfgScan').value   = cfg.scanUrl;
   document.getElementById('cfgWrite').value  = cfg.writeUrl;
-  document.getElementById('cfgDb').value     = cfg.dbId;
   document.getElementById('cfgProxy').value  = cfg.proxyUrl;
   updateConnState();
 }
 function saveSettings(){
-  cfg.scanUrl      = document.getElementById('cfgScan').value.trim();
-  cfg.writeUrl     = document.getElementById('cfgWrite').value.trim();
-  cfg.dbId         = document.getElementById('cfgDb').value.trim();
-  cfg.proxyUrl     = document.getElementById('cfgProxy').value.trim() || DEFAULT_PROXY;
+  cfg.scanUrl  = document.getElementById('cfgScan').value.trim();
+  cfg.writeUrl = document.getElementById('cfgWrite').value.trim();
+  cfg.proxyUrl = document.getElementById('cfgProxy').value.trim() || DEFAULT_PROXY;
   localStorage.setItem('adl-ts-cfg',JSON.stringify(cfg));
   updateConnState(); closeSettings();
   toast('Settings saved','s');
@@ -825,7 +818,7 @@ async function fetchNotionEntries(){
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
-      databaseId: cfg.dbId,
+      db: 'timesheets',
       sorts:[{property:'Date',direction:'descending'}],
       page_size: 200
     })

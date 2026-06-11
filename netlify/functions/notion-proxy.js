@@ -2,10 +2,13 @@
  * Notion Proxy — Netlify Function
  *
  * Forwards Notion database queries from the cockpit to api.notion.com.
- * The NOTION_TOKEN never leaves the server; set it in Netlify → Site → Environment Variables.
+ * All secrets stay server-side — set in Netlify → Site → Environment Variables:
+ *   NOTION_TOKEN          — internal integration token
+ *   NOTION_TIMESHEETS_DB  — timesheets database ID
+ *   NOTION_PROJECTS_DB    — projects database ID (optional, for future use)
  *
  * Called by the cockpit as POST /.netlify/functions/notion-proxy
- * Body: { databaseId: string, filter?: object, sorts?: array, page_size?: number }
+ * Body: { db?: 'timesheets'|'projects', filter?: object, sorts?: array, page_size?: number }
  */
 
 const NOTION_VERSION = '2022-06-28';
@@ -36,9 +39,15 @@ exports.handler = async (event) => {
     return respond(400, { error: 'Invalid JSON body' });
   }
 
-  const { databaseId, ...queryPayload } = body;
+  const { db = 'timesheets', ...queryPayload } = body;
+
+  const DB_MAP = {
+    timesheets: process.env.NOTION_TIMESHEETS_DB,
+    projects:   process.env.NOTION_PROJECTS_DB,
+  };
+  const databaseId = DB_MAP[db];
   if (!databaseId) {
-    return respond(400, { error: 'databaseId is required' });
+    return respond(500, { error: `NOTION_${db.toUpperCase()}_DB not configured in environment` });
   }
 
   try {
