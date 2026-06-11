@@ -628,7 +628,8 @@ async function scanInbox(){
     const res=await fetch(cfg.scanUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'scan'})});
     if(res.ok){
       const files=await res.json();
-      renderFileList(files);
+      const imported=await fetchImportedFiles();
+      renderFileList(files, imported);
     } else {
       list.innerHTML='<div class="empty" style="padding:16px;color:var(--red)">Scan failed ('+res.status+').</div>';
     }
@@ -639,30 +640,49 @@ async function scanInbox(){
   btn.disabled=false;btn.textContent='↻ Scan Inbox';
 }
 
+async function fetchImportedFiles(){
+  try{
+    const res=await fetch(cfg.proxyUrl||DEFAULT_PROXY,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({db:'timesheets', page_size:200})
+    });
+    if(!res.ok) return new Set();
+    const data=await res.json();
+    if(!data.results) return new Set();
+    const names=data.results
+      .map(p=>p.properties?.['Source File']?.rich_text?.[0]?.plain_text)
+      .filter(Boolean);
+    return new Set(names);
+  }catch(e){ return new Set(); }
+}
+
 let scannedFiles=[];
-function renderFileList(files){
+function renderFileList(files, importedSet=new Set()){
   scannedFiles=files;
   const list=document.getElementById('fileList');
   if(!files.length){list.innerHTML='<div class="empty" style="padding:16px;color:var(--muted)">No files available — Dropbox /Timesheets/Inbox is empty.</div>';return;}
   list.innerHTML=files.map((f,i)=>{
-    // If headers not provided by Make (unverified) — selectable but unconfirmed
+    const duplicate = importedSet.has(f.name);
     const unverified = f.headers == null;
     const map = unverified ? {mapped:[],missing:[]} : mapHeaders(f.headers||[]);
     const ok      = !unverified && map.missing.length===0;
     const partial  = !unverified && map.missing.length<=2 && map.mapped.length>=5;
-    const enabled  = ok || partial || unverified;
-    const badgeClass = unverified?'warn': ok?'ok': partial?'warn':'err';
-    const badgeText  = unverified?'? Unverified': ok?'✓ Compatible': partial?'⚠ Partial':'✗ Incompatible';
+    const enabled  = ok || partial || unverified; // always selectable — Make guard is the real block
+    const badgeClass = duplicate?'err': unverified?'warn': ok?'ok': partial?'warn':'err';
+    const badgeText  = duplicate?'↩ Already Imported': unverified?'? Unverified': ok?'✓ Compatible': partial?'⚠ Partial':'✗ Incompatible';
     const detailId='fd'+i;
-    return `<div class="file-row" id="fr${i}" onclick="toggleFileSelect(${i},event)">
+    const rowStyle=duplicate?' style="border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.04)"':'';
+    return `<div class="file-row" id="fr${i}"${rowStyle} onclick="toggleFileSelect(${i},event)">
       <input type="checkbox" id="fc${i}" ${enabled?'':'disabled'} onchange="onFileCheck()" onclick="event.stopPropagation()">
       <span class="file-name" title="${esc(f.name)}">${esc(f.name)}</span>
       <span class="file-meta">${esc(f.size||'')} · ${esc(f.modified||'')}</span>
-      <span class="compat-badge ${badgeClass}" onclick="toggleDetail('${detailId}',event)">${badgeText}${unverified?'':' ▾'}</span>
+      <span class="compat-badge ${badgeClass}" onclick="toggleDetail('${detailId}',event)">${badgeText} ▾</span>
     </div>
     <div class="compat-detail" id="${detailId}">
-      ${map.mapped.length?'<span class="mapped">Mapped: '+map.mapped.join(', ')+'</span><br>':''}
-      ${map.missing.length?'<span class="missing">Missing: '+map.missing.join(', ')+'</span>':''}
+      ${duplicate?'<span class="missing">Already imported to Notion. Re-selecting will create duplicates unless the Make scenario guard is active.</span>':''}
+      ${!duplicate&&map.mapped.length?'<span class="mapped">Mapped: '+map.mapped.join(', ')+'</span><br>':''}
+      ${!duplicate&&map.missing.length?'<span class="missing">Missing: '+map.missing.join(', ')+'</span>':''}
     </div>`;
   }).join('');
   document.getElementById('step1num').className='step-num done';
