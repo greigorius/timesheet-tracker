@@ -615,17 +615,27 @@ function mapHeaders(hdrs){
 // ─────────────────────────────────────────────────────────
 async function scanInbox(){
   const btn=document.getElementById('scanBtn');
+  const list=document.getElementById('fileList');
   btn.disabled=true;btn.innerHTML='<span class="spin"></span>';
-  await sleep(800); // simulate network
-  let files=DEMO_FILES;
-  // If real scan webhook exists, call it
-  if(cfg.scanUrl){
-    try{
-      const res=await fetch(cfg.scanUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'scan'})});
-      if(res.ok) files=await res.json();
-    }catch(e){toast('Scan error: '+e.message,'e')}
+
+  if(!cfg.scanUrl){
+    list.innerHTML='<div class="empty" style="padding:16px;color:var(--muted)">No scan webhook configured — add it in ⚙ Settings.</div>';
+    btn.disabled=false;btn.textContent='↻ Scan Inbox';
+    return;
   }
-  renderFileList(files);
+
+  try{
+    const res=await fetch(cfg.scanUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'scan'})});
+    if(res.ok){
+      const files=await res.json();
+      renderFileList(files);
+    } else {
+      list.innerHTML='<div class="empty" style="padding:16px;color:var(--red)">Scan failed ('+res.status+').</div>';
+    }
+  }catch(e){
+    list.innerHTML='<div class="empty" style="padding:16px;color:var(--red)">Scan error: '+esc(e.message)+'</div>';
+  }
+
   btn.disabled=false;btn.textContent='↻ Scan Inbox';
 }
 
@@ -633,7 +643,7 @@ let scannedFiles=[];
 function renderFileList(files){
   scannedFiles=files;
   const list=document.getElementById('fileList');
-  if(!files.length){list.innerHTML='<div class="empty" style="padding:16px">Inbox is empty.</div>';return;}
+  if(!files.length){list.innerHTML='<div class="empty" style="padding:16px;color:var(--muted)">No files available — Dropbox /Timesheets/Inbox is empty.</div>';return;}
   list.innerHTML=files.map((f,i)=>{
     // If headers not provided by Make (unverified) — selectable but unconfirmed
     const unverified = f.headers == null;

@@ -6,7 +6,7 @@
       "module": "gateway:CustomWebHook",
       "version": 1,
       "parameters": {
-        "hook": "__REPLACE_WITH_YOUR_WEBHOOK_ID__",
+        "hook": 0,
         "maxResults": 1
       },
       "mapper": {},
@@ -14,7 +14,7 @@
         "designer": { "x": 0, "y": 0 },
         "restore": {
           "parameters": {
-            "hook": { "label": "ADL Write to Notion Webhook" }
+            "hook": { "label": "Create a new webhook — name it ADL Write to Notion" }
           }
         }
       }
@@ -34,10 +34,10 @@
     },
     {
       "id": 3,
-      "module": "dropbox:ActionGetFile",
-      "version": 3,
+      "module": "dropbox:getFile",
+      "version": 5,
       "parameters": {
-        "__IMTCONN__": "__REPLACE_WITH_YOUR_DROPBOX_CONNECTION_ID__"
+        "__IMTCONN__": 0
       },
       "mapper": {
         "path": "/Timesheets/Inbox/{{2.value}}"
@@ -46,7 +46,7 @@
         "designer": { "x": 600, "y": 0 },
         "restore": {
           "parameters": {
-            "__IMTCONN__": { "label": "Greig Dropbox" }
+            "__IMTCONN__": { "label": "Connect your Dropbox account" }
           }
         }
       }
@@ -55,12 +55,15 @@
       "id": 4,
       "module": "http:ActionSendData",
       "version": 3,
-      "parameters": { "handleErrors": false, "useNewZLibDecompression": true },
+      "parameters": {
+        "handleErrors": false,
+        "useNewZLibDecompression": true
+      },
       "mapper": {
         "url": "https://api.anthropic.com/v1/messages",
         "method": "POST",
         "headers": [
-          { "name": "x-api-key", "value": "__REPLACE_WITH_ANTHROPIC_API_KEY__" },
+          { "name": "x-api-key", "value": "YOUR_ANTHROPIC_API_KEY" },
           { "name": "anthropic-version", "value": "2023-06-01" },
           { "name": "content-type", "value": "application/json" }
         ],
@@ -70,8 +73,7 @@
         "timeout": 60
       },
       "metadata": {
-        "designer": { "x": 900, "y": 0 },
-        "_comment": "Claude parses the raw XLSX and normalises all rows in one call. See docs/claude-normalise-prompt.md for the system prompt to paste into the Make variable store."
+        "designer": { "x": 900, "y": 0 }
       }
     },
     {
@@ -80,7 +82,7 @@
       "version": 1,
       "parameters": {},
       "mapper": {
-        "json": "{{parseJSON(4.body).content[].text}}"
+        "json": "{{parseJSON(4.body).content[1].text}}"
       },
       "metadata": {
         "designer": { "x": 1200, "y": 0 }
@@ -101,14 +103,14 @@
     },
     {
       "id": 7,
-      "module": "notion:ActionCreatePage",
-      "version": 2,
+      "module": "notion:createAPage",
+      "version": 1,
       "parameters": {
-        "__IMTCONN__": "__REPLACE_WITH_YOUR_NOTION_CONNECTION_ID__"
+        "__IMTCONN__": 0
       },
       "mapper": {
         "object": "database",
-        "value": "197210e4-582e-8087-81be-000b8525577a",
+        "value": "197210e4582e808781be000b8525577a",
         "properties": [
           {
             "name": "Person",
@@ -161,18 +163,17 @@
         "designer": { "x": 1800, "y": 0 },
         "restore": {
           "parameters": {
-            "__IMTCONN__": { "label": "Greig Notion" }
+            "__IMTCONN__": { "label": "Connect your Notion account" }
           }
-        },
-        "_comment": "Writes one normalised row to the Notion Timesheets DB"
+        }
       }
     },
     {
       "id": 8,
-      "module": "dropbox:ActionMoveFile",
-      "version": 3,
+      "module": "dropbox:moveFileFolder",
+      "version": 5,
       "parameters": {
-        "__IMTCONN__": "__REPLACE_WITH_YOUR_DROPBOX_CONNECTION_ID__"
+        "__IMTCONN__": 0
       },
       "mapper": {
         "fromPath": "/Timesheets/Inbox/{{2.value}}",
@@ -181,13 +182,16 @@
       },
       "metadata": {
         "designer": { "x": 600, "y": 200 },
-        "_comment": "After all rows written: move file to /Timesheets/Processed/ so it doesn't re-appear on next scan",
-        "route": "after_all_rows"
+        "restore": {
+          "parameters": {
+            "__IMTCONN__": { "label": "Connect your Dropbox account" }
+          }
+        }
       }
     },
     {
       "id": 9,
-      "module": "gateway:WebHookResponse",
+      "module": "gateway:WebhookRespond",
       "version": 1,
       "parameters": {},
       "mapper": {
@@ -196,7 +200,7 @@
           { "name": "Content-Type", "value": "application/json" },
           { "name": "Access-Control-Allow-Origin", "value": "*" }
         ],
-        "body": "{\"status\": \"ok\", \"file\": \"{{2.value}}\", \"rows_written\": {{length(5.array)}}}"
+        "body": "{\"status\": \"ok\", \"file\": \"{{2.value}}\"}"
       },
       "metadata": {
         "designer": { "x": 2100, "y": 0 }
@@ -211,7 +215,7 @@
       "maxErrors": 3,
       "autoCommit": true,
       "autoCommitTriggerLast": true,
-      "sequential": true,
+      "sequential": false,
       "confidential": false,
       "dataloss": false,
       "dlq": false,
@@ -222,23 +226,17 @@
     },
     "zone": "eu1.make.com"
   },
-  "_comments": {
-    "setup": [
-      "1. Create the Dropbox folder /Timesheets/Processed/ before first run",
-      "2. In Make.com: Create scenario → Import Blueprint → paste this file",
-      "3. Create a new Webhook trigger named 'ADL Write to Notion Webhook'",
-      "4. Connect Dropbox and Notion accounts",
-      "5. Add Anthropic API key to the HTTP module",
-      "6. Create a Make variable named CLAUDE_PARSE_SYSTEM_PROMPT — paste the content from docs/claude-normalise-prompt.md",
-      "7. Copy the webhook URL → cockpit Settings → Make Write to Notion Webhook URL",
-      "8. Test with a single file: select one file in cockpit → Write to Notion"
-    ],
-    "notes": [
-      "Claude Haiku processes the entire file in one call — faster and cheaper than row-by-row",
-      "The system prompt handles all column alias mapping and category normalisation",
-      "Files are moved to /Timesheets/Processed/ after successful import to prevent duplicates",
-      "If a row is missing required fields, Claude sets import_status to 'Flagged'",
-      "Project matching against Notion Projects DB is done by Claude — it matches on project ref number (e.g. 24-367)"
-    ]
-  }
+  "_setup": [
+    "1. Delete the broken scenario in Make",
+    "2. Create new scenario → three-dot menu → Import Blueprint → paste this file",
+    "3. Save into folder: Timesheets",
+    "4. Module 1 (Webhook): create new webhook, name it 'ADL Write to Notion'",
+    "5. Module 3 (Dropbox Download): connect Dropbox — confirm path uses {{2.value}}",
+    "6. Module 4 (HTTP): replace YOUR_ANTHROPIC_API_KEY in the x-api-key header",
+    "7. Module 7 (Notion): connect Notion account — confirm DB ID is correct",
+    "8. Module 8 (Dropbox Move): connect Dropbox — create /Timesheets/Processed/ folder first",
+    "9. Scenario Settings → turn OFF Sequential processing",
+    "10. Create Make variable CLAUDE_PARSE_SYSTEM_PROMPT — paste content from docs/claude-normalise-prompt.md",
+    "11. Copy webhook URL from Module 1 → cockpit Settings → Write to Notion Webhook URL"
+  ]
 }
