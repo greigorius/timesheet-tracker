@@ -9,5 +9,8 @@
   },
   "devDependencies": {
     "vite": "^5.4.0"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
   }
 }
