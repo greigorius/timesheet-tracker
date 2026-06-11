@@ -1,0 +1,244 @@
+{
+  "name": "ADL Timesheets — Scenario A: Full Import",
+  "flow": [
+    {
+      "id": 1,
+      "module": "gateway:CustomWebHook",
+      "version": 1,
+      "parameters": {
+        "hook": "__REPLACE_WITH_YOUR_WEBHOOK_ID__",
+        "maxResults": 1
+      },
+      "mapper": {},
+      "metadata": {
+        "designer": { "x": 0, "y": 0 },
+        "restore": {
+          "parameters": {
+            "hook": { "label": "ADL Write to Notion Webhook" }
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "module": "builtin:BasicFeeder",
+      "version": 1,
+      "parameters": {},
+      "mapper": {
+        "array": "{{1.files}}"
+      },
+      "metadata": {
+        "designer": { "x": 300, "y": 0 },
+        "_comment": "Iterates over the array of filenames sent by the cockpit"
+      }
+    },
+    {
+      "id": 3,
+      "module": "dropbox:ActionGetFile",
+      "version": 3,
+      "parameters": {
+        "__IMTCONN__": "__REPLACE_WITH_YOUR_DROPBOX_CONNECTION_ID__"
+      },
+      "mapper": {
+        "path": "/Timesheets/Inbox/{{2.value}}"
+      },
+      "metadata": {
+        "designer": { "x": 600, "y": 0 },
+        "restore": {
+          "parameters": {
+            "__IMTCONN__": { "label": "Greig Dropbox" }
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "module": "http:ActionSendData",
+      "version": 3,
+      "parameters": { "handleErrors": false, "useNewZLibDecompression": true },
+      "mapper": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "method": "POST",
+        "headers": [
+          { "name": "x-api-key", "value": "__REPLACE_WITH_ANTHROPIC_API_KEY__" },
+          { "name": "anthropic-version", "value": "2023-06-01" },
+          { "name": "content-type", "value": "application/json" }
+        ],
+        "bodyType": "raw",
+        "contentType": "application/json",
+        "body": "{\n  \"model\": \"claude-haiku-4-5-20251001\",\n  \"max_tokens\": 4096,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Parse this Excel timesheet file and return all data rows as a JSON array.\\n\\nSource file: {{2.value}}\\nFile data (base64): {{3.data}}\\n\\nReturn ONLY a raw JSON array — no markdown, no explanation.\"\n    }\n  ],\n  \"system\": \"{{escapeMarkdown(getVariable('CLAUDE_PARSE_SYSTEM_PROMPT'))}}\"\n}",
+        "timeout": 60
+      },
+      "metadata": {
+        "designer": { "x": 900, "y": 0 },
+        "_comment": "Claude parses the raw XLSX and normalises all rows in one call. See docs/claude-normalise-prompt.md for the system prompt to paste into the Make variable store."
+      }
+    },
+    {
+      "id": 5,
+      "module": "json:ParseJSON",
+      "version": 1,
+      "parameters": {},
+      "mapper": {
+        "json": "{{parseJSON(4.body).content[].text}}"
+      },
+      "metadata": {
+        "designer": { "x": 1200, "y": 0 }
+      }
+    },
+    {
+      "id": 6,
+      "module": "builtin:BasicFeeder",
+      "version": 1,
+      "parameters": {},
+      "mapper": {
+        "array": "{{5.array}}"
+      },
+      "metadata": {
+        "designer": { "x": 1500, "y": 0 },
+        "_comment": "Iterates over each normalised row object from Claude"
+      }
+    },
+    {
+      "id": 7,
+      "module": "notion:ActionCreatePage",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": "__REPLACE_WITH_YOUR_NOTION_CONNECTION_ID__"
+      },
+      "mapper": {
+        "object": "database",
+        "value": "197210e4-582e-8087-81be-000b8525577a",
+        "properties": [
+          {
+            "name": "Person",
+            "type": "rich_text",
+            "value": "{{6.value.person}}"
+          },
+          {
+            "name": "Project",
+            "type": "rich_text",
+            "value": "{{6.value.project}}"
+          },
+          {
+            "name": "Category",
+            "type": "select",
+            "value": "{{6.value.category}}"
+          },
+          {
+            "name": "Description",
+            "type": "rich_text",
+            "value": "{{6.value.description}}"
+          },
+          {
+            "name": "Date",
+            "type": "date",
+            "value": "{{6.value.date}}"
+          },
+          {
+            "name": "Day",
+            "type": "select",
+            "value": "{{6.value.day}}"
+          },
+          {
+            "name": "Hours",
+            "type": "number",
+            "value": "{{6.value.hours}}"
+          },
+          {
+            "name": "Import Status",
+            "type": "select",
+            "value": "{{6.value.import_status}}"
+          },
+          {
+            "name": "Source File",
+            "type": "rich_text",
+            "value": "{{2.value}}"
+          }
+        ]
+      },
+      "metadata": {
+        "designer": { "x": 1800, "y": 0 },
+        "restore": {
+          "parameters": {
+            "__IMTCONN__": { "label": "Greig Notion" }
+          }
+        },
+        "_comment": "Writes one normalised row to the Notion Timesheets DB"
+      }
+    },
+    {
+      "id": 8,
+      "module": "dropbox:ActionMoveFile",
+      "version": 3,
+      "parameters": {
+        "__IMTCONN__": "__REPLACE_WITH_YOUR_DROPBOX_CONNECTION_ID__"
+      },
+      "mapper": {
+        "fromPath": "/Timesheets/Inbox/{{2.value}}",
+        "toPath": "/Timesheets/Processed/{{2.value}}",
+        "autoRename": true
+      },
+      "metadata": {
+        "designer": { "x": 600, "y": 200 },
+        "_comment": "After all rows written: move file to /Timesheets/Processed/ so it doesn't re-appear on next scan",
+        "route": "after_all_rows"
+      }
+    },
+    {
+      "id": 9,
+      "module": "gateway:WebHookResponse",
+      "version": 1,
+      "parameters": {},
+      "mapper": {
+        "status": "200",
+        "headers": [
+          { "name": "Content-Type", "value": "application/json" },
+          { "name": "Access-Control-Allow-Origin", "value": "*" }
+        ],
+        "body": "{\"status\": \"ok\", \"file\": \"{{2.value}}\", \"rows_written\": {{length(5.array)}}}"
+      },
+      "metadata": {
+        "designer": { "x": 2100, "y": 0 }
+      }
+    }
+  ],
+  "metadata": {
+    "instant": true,
+    "version": 1,
+    "scenario": {
+      "roundtrips": 1,
+      "maxErrors": 3,
+      "autoCommit": true,
+      "autoCommitTriggerLast": true,
+      "sequential": true,
+      "confidential": false,
+      "dataloss": false,
+      "dlq": false,
+      "freshVariables": false
+    },
+    "designer": {
+      "orphans": []
+    },
+    "zone": "eu1.make.com"
+  },
+  "_comments": {
+    "setup": [
+      "1. Create the Dropbox folder /Timesheets/Processed/ before first run",
+      "2. In Make.com: Create scenario → Import Blueprint → paste this file",
+      "3. Create a new Webhook trigger named 'ADL Write to Notion Webhook'",
+      "4. Connect Dropbox and Notion accounts",
+      "5. Add Anthropic API key to the HTTP module",
+      "6. Create a Make variable named CLAUDE_PARSE_SYSTEM_PROMPT — paste the content from docs/claude-normalise-prompt.md",
+      "7. Copy the webhook URL → cockpit Settings → Make Write to Notion Webhook URL",
+      "8. Test with a single file: select one file in cockpit → Write to Notion"
+    ],
+    "notes": [
+      "Claude Haiku processes the entire file in one call — faster and cheaper than row-by-row",
+      "The system prompt handles all column alias mapping and category normalisation",
+      "Files are moved to /Timesheets/Processed/ after successful import to prevent duplicates",
+      "If a row is missing required fields, Claude sets import_status to 'Flagged'",
+      "Project matching against Notion Projects DB is done by Claude — it matches on project ref number (e.g. 24-367)"
+    ]
+  }
+}

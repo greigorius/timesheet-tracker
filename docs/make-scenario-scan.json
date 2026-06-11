@@ -1,0 +1,194 @@
+{
+  "name": "ADL Timesheets — Scenario B: Scan Inbox",
+  "flow": [
+    {
+      "id": 1,
+      "module": "gateway:CustomWebHook",
+      "version": 1,
+      "parameters": {
+        "hook": "__REPLACE_WITH_YOUR_WEBHOOK_ID__",
+        "maxResults": 1
+      },
+      "mapper": {},
+      "metadata": {
+        "designer": { "x": 0, "y": 0 },
+        "restore": {
+          "parameters": {
+            "hook": { "label": "ADL Scan Inbox Webhook" }
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "module": "dropbox:ActionListFilesAndFolders",
+      "version": 3,
+      "parameters": {
+        "__IMTCONN__": "__REPLACE_WITH_YOUR_DROPBOX_CONNECTION_ID__"
+      },
+      "mapper": {
+        "path": "/Timesheets/Inbox",
+        "includeMediaInfo": false,
+        "includeDeleted": false,
+        "includeHasExplicitSharedMembers": false
+      },
+      "metadata": {
+        "designer": { "x": 300, "y": 0 },
+        "restore": {
+          "parameters": {
+            "__IMTCONN__": { "label": "Greig Dropbox" }
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "module": "builtin:BasicFeeder",
+      "version": 1,
+      "parameters": {},
+      "mapper": {
+        "array": "{{2.files}}"
+      },
+      "metadata": {
+        "designer": { "x": 600, "y": 0 }
+      }
+    },
+    {
+      "id": 4,
+      "module": "dropbox:ActionGetFile",
+      "version": 3,
+      "parameters": {
+        "__IMTCONN__": "__REPLACE_WITH_YOUR_DROPBOX_CONNECTION_ID__"
+      },
+      "mapper": {
+        "path": "{{3.path_lower}}",
+        "rev": null
+      },
+      "metadata": {
+        "designer": { "x": 900, "y": 0 },
+        "restore": {
+          "parameters": {
+            "__IMTCONN__": { "label": "Greig Dropbox" }
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "module": "http:ActionSendData",
+      "version": 3,
+      "parameters": { "handleErrors": false, "useNewZLibDecompression": true },
+      "mapper": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "method": "POST",
+        "headers": [
+          { "name": "x-api-key", "value": "__REPLACE_WITH_ANTHROPIC_API_KEY__" },
+          { "name": "anthropic-version", "value": "2023-06-01" },
+          { "name": "content-type", "value": "application/json" }
+        ],
+        "bodyType": "raw",
+        "contentType": "application/json",
+        "body": "{\n  \"model\": \"claude-haiku-4-5-20251001\",\n  \"max_tokens\": 512,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Extract the column headers from row 1 of this Excel file (base64 encoded). Return ONLY a JSON array of strings — the header names exactly as they appear in the file. No explanation.\\n\\nFile name: {{3.name}}\\nFile data (base64): {{4.data}}\"\n    }\n  ],\n  \"system\": \"You are a data extraction tool. When given a base64-encoded Excel (.xlsx) file, you extract the column headers from the first row and return them as a JSON array of strings. Return nothing else — just the raw JSON array.\"\n}",
+        "timeout": 30
+      },
+      "metadata": {
+        "designer": { "x": 1200, "y": 0 }
+      }
+    },
+    {
+      "id": 6,
+      "module": "json:ParseJSON",
+      "version": 1,
+      "parameters": {},
+      "mapper": {
+        "json": "{{parseJSON(5.body).content[].text}}"
+      },
+      "metadata": {
+        "designer": { "x": 1500, "y": 0 }
+      }
+    },
+    {
+      "id": 7,
+      "module": "builtin:ArrayAggregator",
+      "version": 1,
+      "parameters": {
+        "feeder": 3,
+        "fieldsMapping": [
+          {
+            "name": "name",
+            "value": "{{3.name}}"
+          },
+          {
+            "name": "size",
+            "value": "{{formatNumber(divide(3.size; 1024); 0)}} KB"
+          },
+          {
+            "name": "modified",
+            "value": "{{formatDate(3.server_modified; 'DD MMM YYYY HH:mm')}}"
+          },
+          {
+            "name": "headers",
+            "value": "{{6.array}}"
+          }
+        ]
+      },
+      "metadata": {
+        "designer": { "x": 1800, "y": 0 }
+      }
+    },
+    {
+      "id": 8,
+      "module": "gateway:WebHookResponse",
+      "version": 1,
+      "parameters": {},
+      "mapper": {
+        "status": "200",
+        "headers": [
+          { "name": "Content-Type", "value": "application/json" },
+          { "name": "Access-Control-Allow-Origin", "value": "*" }
+        ],
+        "body": "{{toString(7.array)}}"
+      },
+      "metadata": {
+        "designer": { "x": 2100, "y": 0 }
+      }
+    }
+  ],
+  "metadata": {
+    "instant": true,
+    "version": 1,
+    "scenario": {
+      "roundtrips": 1,
+      "maxErrors": 3,
+      "autoCommit": true,
+      "autoCommitTriggerLast": true,
+      "sequential": true,
+      "confidential": false,
+      "dataloss": false,
+      "dlq": false,
+      "freshVariables": false
+    },
+    "designer": {
+      "orphans": []
+    },
+    "zone": "eu1.make.com"
+  },
+  "_comments": {
+    "setup": [
+      "1. In Make.com: Create scenario → Import Blueprint → paste this file",
+      "2. Replace all __REPLACE_WITH_*__ placeholders after import (Make will prompt you)",
+      "3. Create a new Webhook trigger named 'ADL Scan Inbox Webhook'",
+      "4. Connect your Dropbox account to the Dropbox modules",
+      "5. Add your Anthropic API key to the HTTP module header",
+      "6. Confirm the Dropbox path matches where DTs drop files: /Timesheets/Inbox",
+      "7. Copy the webhook URL and paste it into the cockpit Settings → Make Scan Webhook URL",
+      "8. Test: click Run once in Make, then click Scan Inbox in the cockpit"
+    ],
+    "notes": [
+      "This scenario responds synchronously — the cockpit waits for the response",
+      "Claude Haiku is used for header extraction (fast + cheap for this task)",
+      "If a file has no readable headers, it will appear as 'unverified' in the cockpit",
+      "The Dropbox path /Timesheets/Inbox should be created manually in Dropbox if it doesn't exist"
+    ]
+  }
+}
