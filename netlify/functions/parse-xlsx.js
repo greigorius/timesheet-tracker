@@ -28,16 +28,28 @@ exports.handler = async (event) => {
     return respond(405, { error: 'Method not allowed' });
   }
 
-  let body;
-  try {
-    body = JSON.parse(event.body || '{}');
-  } catch {
-    return respond(400, { error: 'Invalid JSON body' });
+  let base64Data, filename;
+
+  const contentType = (event.headers['content-type'] || '').toLowerCase();
+
+  if (contentType.includes('application/octet-stream') || event.isBase64Encoded) {
+    // Binary body — Netlify auto-base64-encodes it and sets isBase64Encoded=true
+    base64Data = event.body;
+    filename = event.queryStringParameters?.filename || 'file.xlsx';
+  } else {
+    // JSON body: { data: "<base64 string>", filename: "..." }
+    let body;
+    try {
+      body = JSON.parse(event.body || '{}');
+    } catch {
+      return respond(400, { error: 'Invalid JSON body' });
+    }
+    base64Data = body.data;
+    filename = body.filename || 'file.xlsx';
   }
 
-  const { data: base64Data, filename = 'file.xlsx' } = body;
   if (!base64Data) {
-    return respond(400, { error: 'Missing required field: data (base64 XLSX)' });
+    return respond(400, { error: 'Missing file data — send binary body (Content-Type: application/octet-stream) or JSON { data: "<base64>" }' });
   }
 
   try {
