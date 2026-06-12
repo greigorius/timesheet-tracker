@@ -32,7 +32,12 @@ exports.handler = async (event) => {
 
   const contentType = (event.headers['content-type'] || '').toLowerCase();
 
-  if (contentType.includes('application/octet-stream') || event.isBase64Encoded) {
+  if (contentType.includes('text/plain')) {
+    // Plain-text body: the entire body is the base64-encoded file.
+    // Strip any whitespace/newlines that Make's encodeBase64() may have added.
+    base64Data = (event.body || '').replace(/\s+/g, '');
+    filename = event.queryStringParameters?.filename || 'file.xlsx';
+  } else if (contentType.includes('application/octet-stream') || event.isBase64Encoded) {
     // Binary body — Netlify auto-base64-encodes it and sets isBase64Encoded=true
     base64Data = event.body;
     filename = event.queryStringParameters?.filename || 'file.xlsx';
@@ -44,12 +49,12 @@ exports.handler = async (event) => {
     } catch {
       return respond(400, { error: 'Invalid JSON body' });
     }
-    base64Data = body.data;
+    base64Data = (body.data || '').replace(/\s+/g, '');
     filename = body.filename || 'file.xlsx';
   }
 
   if (!base64Data) {
-    return respond(400, { error: 'Missing file data — send binary body (Content-Type: application/octet-stream) or JSON { data: "<base64>" }' });
+    return respond(400, { error: 'Missing file data — send as text/plain body (base64) or JSON { data: "<base64>" }' });
   }
 
   try {
