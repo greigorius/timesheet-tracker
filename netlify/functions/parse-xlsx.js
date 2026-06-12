@@ -135,8 +135,17 @@ exports.handler = async (event) => {
 
     const csv = csvLines.join('\n');
 
+    // Pre-escaped version safe for embedding directly inside a JSON string literal
+    // (used by Make.com's Raw body HTTP module which can't run char() in formulas)
+    const csvEscaped = csv
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\r/g, '')
+      .replace(/\n/g, '\\n');
+
     return respond(200, {
       csv,
+      csv_escaped: csvEscaped,
       rows: dataRows.length,
       person,
       week_commencing: weekCommencing,
