@@ -221,8 +221,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 
 
 /* ── TABLE (import log) ── */
-.tbl-wrap{overflow-x:auto;max-height:380px;overflow-y:auto}
-table{width:100%;border-collapse:collapse;font-size:12px}
+.tbl-wrap{overflow-x:auto;max-height:420px;overflow-y:auto}
+table{width:100%;min-width:860px;border-collapse:collapse;font-size:12px;table-layout:fixed}
 thead th{font-family:var(--mono);font-size:10px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);background:var(--surface2);white-space:nowrap;position:sticky;top:0;z-index:1}
 tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
 tbody tr:last-child{border-bottom:none}
@@ -478,9 +478,14 @@ td.dim{color:var(--muted)}
     </div>
     <div class="tbl-wrap">
       <table>
+        <colgroup>
+          <col style="width:125px"><col style="width:80px"><col style="width:110px"><col style="width:82px">
+          <col style="width:88px"><col style="width:115px"><col style="width:40px">
+          <col><col style="width:46px"><col style="width:72px"><col style="width:88px"><col style="width:34px">
+        </colgroup>
         <thead><tr>
           <th>Person</th><th>Client</th><th>Project</th><th>Item</th>
-          <th>Date</th><th>Cat</th><th>Var</th>
+          <th>Date</th><th>Cat</th><th style="text-align:center">Var</th>
           <th>Desc</th><th style="text-align:right">Hrs</th>
           <th>Status</th><th>Source</th><th></th>
         </tr></thead>
@@ -901,19 +906,30 @@ async function loadData(){
 
 async function fetchNotionEntries(){
   const proxy = cfg.proxyUrl || DEFAULT_PROXY;
-  const res = await fetch(proxy, {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({
+  // Notion max page_size is 100 — paginate until has_more is false
+  let allResults = [];
+  let startCursor = undefined;
+  let hasMore = true;
+  while(hasMore){
+    const payload = {
       db: 'timesheets',
       sorts:[{property:'Date',direction:'descending'}],
-      page_size: 200
-    })
-  });
-  if(!res.ok) throw new Error('Proxy returned '+res.status);
-  const data = await res.json();
-  if(!data.results) throw new Error('Unexpected response shape');
-  return data.results.map(page => {
+      page_size: 100,
+    };
+    if(startCursor) payload.start_cursor = startCursor;
+    const res = await fetch(proxy, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if(!res.ok) throw new Error('Proxy returned '+res.status);
+    const data = await res.json();
+    if(!data.results) throw new Error('Unexpected response shape');
+    allResults = allResults.concat(data.results);
+    hasMore = data.has_more || false;
+    startCursor = data.next_cursor;
+  }
+  return allResults.map(page => {
     const p = page.properties || {};
     const getProp = (names, type) => {
       for(const n of names){
