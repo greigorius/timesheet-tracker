@@ -32,13 +32,17 @@ exports.handler = async (event) => {
 
   const contentType = (event.headers['content-type'] || '').toLowerCase();
 
-  if (contentType.includes('text/plain')) {
+  if (event.isBase64Encoded) {
+    // Netlify received binary body and auto-encoded it as base64 — use directly.
+    // This happens when Make sends the raw XLSX binary (even with text/plain content-type).
+    base64Data = event.body;
+    filename = event.queryStringParameters?.filename || 'file.xlsx';
+  } else if (contentType.includes('text/plain')) {
     // Plain-text body: the entire body is the base64-encoded file.
     // Strip any whitespace/newlines that Make's encodeBase64() may have added.
     base64Data = (event.body || '').replace(/\s+/g, '');
     filename = event.queryStringParameters?.filename || 'file.xlsx';
-  } else if (contentType.includes('application/octet-stream') || event.isBase64Encoded) {
-    // Binary body — Netlify auto-base64-encodes it and sets isBase64Encoded=true
+  } else if (contentType.includes('application/octet-stream')) {
     base64Data = event.body;
     filename = event.queryStringParameters?.filename || 'file.xlsx';
   } else {
