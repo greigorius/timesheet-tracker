@@ -291,6 +291,33 @@ td.dim{color:var(--muted)}
 /* section divider */
 .sdiv{display:flex;align-items:center;gap:10px;color:var(--dim);font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.1em}
 .sdiv::before,.sdiv::after{content:'';flex:1;height:1px;background:var(--border)}
+
+/* ── BREAKDOWN ── */
+.bd-row{display:flex;align-items:center;gap:8px;padding:5px 14px;border-bottom:1px solid rgba(30,42,64,.5);transition:background .1s;min-height:30px}
+.bd-row.bd-client{background:rgba(30,42,64,.3);cursor:pointer}
+.bd-row.bd-project{cursor:pointer;padding-left:28px}
+.bd-row.bd-item{padding-left:50px}
+.bd-row.bd-client:hover,.bd-row.bd-project:hover{background:var(--surface2)}
+.bd-chevron{font-size:9px;color:var(--muted);width:14px;flex-shrink:0;font-family:var(--mono);user-select:none}
+.bd-label{font-size:12px;color:var(--text);min-width:140px;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bd-bar-wrap{flex:1;height:16px;display:flex;align-items:center;margin:0 8px}
+.bd-bar{height:100%;display:flex;border-radius:2px;overflow:hidden;min-width:3px}
+.bd-seg.contracted{background:var(--blue);height:100%}
+.bd-seg.variation{background:var(--amber);height:100%}
+.bd-total{font-family:var(--mono);font-size:11px;color:var(--text);width:44px;text-align:right;flex-shrink:0}
+.bd-split{font-family:var(--mono);font-size:10px;width:130px;text-align:right;flex-shrink:0;white-space:nowrap}
+.bd-c{color:var(--blue-bright)}
+.bd-v{color:var(--amber)}
+.bd-legend{display:flex;gap:16px;padding:8px 14px;border-top:1px solid var(--border);font-family:var(--mono);font-size:10px;color:var(--muted)}
+.bd-legend span{display:flex;align-items:center;gap:5px}
+.bd-legend i{width:10px;height:10px;border-radius:2px;display:inline-block;flex-shrink:0}
+/* variation toggle */
+.var-seg{display:flex;border:1px solid var(--border);border-radius:3px;overflow:hidden}
+.var-seg button{background:none;border:none;color:var(--muted);font-family:var(--mono);font-size:10px;padding:4px 10px;cursor:pointer;transition:all .15s;border-right:1px solid var(--border)}
+.var-seg button:last-child{border-right:none}
+.var-seg button.active{background:var(--blue-dim);color:var(--blue-bright)}
+.var-seg button.active.vvar{background:var(--amber-dim);color:var(--amber)}
+.var-seg button:hover:not(.active){background:var(--surface2);color:var(--text)}
 </style>
 </head>
 <body>
@@ -400,6 +427,29 @@ td.dim{color:var(--muted)}
     <div class="chart-legend" id="chartLegend"></div>
   </div>
 
+  <!-- ══════════════════════════════════════════════
+       HOURS BREAKDOWN
+  ══════════════════════════════════════════════ -->
+  <div class="panel">
+    <div class="ph">
+      <div class="pt">Hours Breakdown</div>
+      <div class="ph-r">
+        <div class="var-seg">
+          <button class="active" data-var="all"        onclick="setVarFilter(this)">All</button>
+          <button               data-var="contracted"  onclick="setVarFilter(this)">Contracted</button>
+          <button class="vvar"  data-var="variation"   onclick="setVarFilter(this)">Variation</button>
+        </div>
+      </div>
+    </div>
+    <div id="breakdownBody" style="padding:4px 0;min-height:60px">
+      <div class="empty">Loading…</div>
+    </div>
+    <div class="bd-legend">
+      <span><i style="background:var(--blue)"></i>Contracted (original scope)</span>
+      <span><i style="background:var(--amber)"></i>Variation / Additional</span>
+    </div>
+  </div>
+
     <!-- ══════════════════════════════════════════════
        IMPORT LOG TABLE
   ══════════════════════════════════════════════ -->
@@ -429,8 +479,9 @@ td.dim{color:var(--muted)}
     <div class="tbl-wrap">
       <table>
         <thead><tr>
-          <th>Person</th><th>Project</th><th>Date</th><th>Day</th>
-          <th>Category</th><th>Desc</th><th style="text-align:right">Hrs</th>
+          <th>Person</th><th>Client</th><th>Project</th><th>Item</th>
+          <th>Date</th><th>Cat</th><th>Var</th>
+          <th>Desc</th><th style="text-align:right">Hrs</th>
           <th>Status</th><th>Source</th><th></th>
         </tr></thead>
         <tbody id="logBody"></tbody>
@@ -535,7 +586,9 @@ const PEOPLE = [
   {id:'AI',name:'Andrew Isted',  color:'#10B981'},
 ];
 const PROJECTS = ['24-367 EIT Observation Hall','24-354 EIT Auditorium','24-334 Peterborough Court'];
-const CATS = ['Design','Drafting','Coordination','Meetings','Admin','Site'];
+const CLIENTS  = ['EIT','DKH Internal','HCA','(internal)'];
+const ITEMS    = ['SK-001','SK-002','DR-001','DR-002','DR-003','PM-001',null,null]; // nulls make some blank
+const CATS = ['Drawing & Modelling - Production','Drawing & Modelling - Revision','Coordination & Research','Meetings','DM Project Admin','Document Control'];
 
 function demoEntries(){
   const today = new Date();
@@ -558,15 +611,18 @@ function demoEntries(){
           const isFlagged = Math.random()<0.06;
           entries.push({
             id: String(id++),
-            person: p.name, personId: p.id,
-            project: Math.random()<0.04?'':proj,
-            date: dateStr,
-            day: days[d],
-            category: CATS[Math.floor(Math.random()*CATS.length)],
-            description: 'Work item '+id,
-            hours: hrs,
-            status: isFlagged?'Flagged':'Imported',
-            sourceFile: p.id+'_'+isoWeek(dt)+'.xlsx'
+            person:    p.name, personId: p.id,
+            client:    CLIENTS[Math.floor(Math.random()*CLIENTS.length)],
+            project:   Math.random()<0.04?'':proj,
+            item_no:   ITEMS[Math.floor(Math.random()*ITEMS.length)] || '',
+            date:      dateStr,
+            day:       days[d],
+            category:  CATS[Math.floor(Math.random()*CATS.length)],
+            desc:      'Work item '+id,
+            hours:     hrs,
+            variation: Math.random()<0.2, // ~20% are variation/additional hours
+            status:    isFlagged?'Flagged':'Imported',
+            sourceFile:p.id+'_'+isoWeek(dt)+'.xlsx'
           });
         });
       });
@@ -840,6 +896,7 @@ async function loadData(){
   populateFilters();
   renderView();
   applyFilters();
+  renderBreakdown();
 }
 
 async function fetchNotionEntries(){
@@ -862,24 +919,59 @@ async function fetchNotionEntries(){
       for(const n of names){
         const prop = p[n];
         if(!prop) continue;
-        if(type==='title') return prop.title?.[0]?.plain_text||'';
+        if(type==='title')     return prop.title?.[0]?.plain_text||'';
         if(type==='rich_text') return prop.rich_text?.[0]?.plain_text||'';
-        if(type==='select') return prop.select?.name||'';
-        if(type==='number') return prop.number??null;
-        if(type==='date') return prop.date?.start||'';
+        if(type==='select')    return prop.select?.name||'';
+        if(type==='number')    return prop.number??null;
+        if(type==='date')      return prop.date?.start||'';
+        if(type==='formula')   return prop.formula?.string || String(prop.formula?.number??'');
+        // relation: proxy resolves _title on each relation entry
+        if(type==='relation')  return prop.relation?.[0]?._title||'';
+        // people: Notion workspace member — name is returned directly
+        if(type==='people')    return prop.people?.[0]?.name||'';
       }
       return '';
     };
+    // Variation: checkbox is preferred; fall back to Y/N text
+    const variationRaw = (() => {
+      for(const n of ['Variation? (Y/N)','Variation','variation']){
+        const prop = p[n];
+        if(!prop) continue;
+        if(prop.type==='checkbox') return prop.checkbox;
+        const txt = (prop.type==='select'     ? prop.select?.name
+                   : prop.type==='rich_text'  ? prop.rich_text?.[0]?.plain_text
+                   : '') || '';
+        if(txt) return ['y','yes','true'].includes(txt.toLowerCase());
+      }
+      return false;
+    })();
     return {
-      id:      page.id,
-      person:  getProp(['Person','Name','Submitter'],'title') || getProp(['Person','Name','Submitter'],'rich_text'),
-      project: getProp(['Project','Job','Scheme','Project Ref'],'rich_text') || getProp(['Project'],'title'),
-      category:getProp(['Category','Cat','Type'],'select'),
-      desc:    getProp(['Description','Notes','Desc'],'rich_text'),
-      date:    getProp(['Date','Work Date'],'date'),
-      day:     getProp(['Day','Weekday'],'select')||getProp(['Day'],'rich_text'),
-      hours:   getProp(['Hours','Hrs','Time'],'number'),
-      status:  getProp(['Import Status','Status','import_status'],'select'),
+      id:       page.id,
+      // Person: try 'people' type first (Notion member), then relation, then text
+      person:   getProp(['Person'],'people')
+             || getProp(['Person','Name','Submitter'],'relation')
+             || getProp(['Person','Name','Submitter'],'title')
+             || getProp(['Person','Name','Submitter'],'rich_text'),
+      // Client / Project / Item are relation properties in this DB
+      client:   getProp(['Client'],'relation')
+             || getProp(['Client'],'rich_text'),
+      project:  getProp(['Project'],'relation')
+             || getProp(['Project','Project Reference','Job','Scheme'],'rich_text')
+             || getProp(['Project'],'title'),
+      item_no:  getProp(['Item'],'relation')
+             || getProp(['Item No.','Item No','ItemNo','item_no'],'rich_text'),
+      category: getProp(['Category','Cat','Type'],'select'),
+      desc:     getProp(['Short Description of Work Done','Description','Notes','Desc'],'title')
+             || getProp(['Short Description of Work Done','Description','Notes','Desc'],'rich_text'),
+      date:     getProp(['Date','Work Date'],'date'),
+      day:      getProp(['Day of Week','Day','Weekday'],'formula')
+             || getProp(['Day of Week','Day','Weekday'],'select')
+             || getProp(['Day of Week','Day','Weekday'],'rich_text'),
+      hours:    getProp(['Actual Hours','Hours','Hrs','Time'],'number'),
+      status:   getProp(['Import Status','Status'],'select')
+             || getProp(['Import Status','Status'],'rich_text'),
+      sourceFile: getProp(['Source File','Source','File'],'rich_text'),
+      variation: variationRaw,
     };
   });
 }
@@ -1197,20 +1289,22 @@ function applyFilters(){
   document.getElementById('fCount').textContent=filtered.length+' rows'+(allEntries.length!==filtered.length?' (filtered)':'')+(allEntries.length&&!document.getElementById('cfgProxy').value?' · demo':'');
   const tbody=document.getElementById('logBody');
   if(!filtered.length){
-    tbody.innerHTML='<tr><td colspan="10"><div class="empty">No entries match the current filters</div></td></tr>';
+    tbody.innerHTML='<tr><td colspan="12"><div class="empty">No entries match the current filters</div></td></tr>';
     return;
   }
   const statusClass={Imported:'imported',Flagged:'flagged',Duplicate:'duplicate',Error:'error'};
   tbody.innerHTML=filtered.map(e=>`<tr>
     <td><span style="display:inline-flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:${getPersonColor(e.person)};display:inline-block;flex-shrink:0"></span>${esc(e.person)}</span></td>
-    <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)" title="${esc(e.project)}">${esc(shortProj(e.project))}</td>
+    <td class="dim" style="max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.client)}">${esc(e.client)||'<span style="color:var(--dim)">—</span>'}</td>
+    <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)" title="${esc(e.project)}">${esc(shortProj(e.project))}</td>
+    <td class="mono dim" style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.item_no)}">${esc(e.item_no)||''}</td>
     <td class="mono dim">${esc(e.date)}</td>
-    <td class="dim">${esc(e.day)}</td>
-    <td class="dim">${esc(e.category)}</td>
-    <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)" title="${esc(e.description)}">${esc(e.description)}</td>
+    <td class="dim" style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.category)}">${esc(e.category)}</td>
+    <td style="text-align:center">${e.variation?'<span style="font-family:var(--mono);font-size:10px;color:var(--amber);background:var(--amber-dim);padding:1px 5px;border-radius:2px">V</span>':'<span style="font-family:var(--mono);font-size:10px;color:var(--muted)">—</span>'}</td>
+    <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)" title="${esc(e.desc)}">${esc(e.desc)}</td>
     <td class="mono" style="text-align:right">${e.hours!=null?e.hours:'<span style="color:var(--red)">—</span>'}</td>
     <td><span class="sp ${statusClass[e.status]||'imported'}">${esc(e.status)}</span></td>
-    <td class="mono dim" style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.sourceFile)}">${esc(e.sourceFile)}</td>
+    <td class="mono dim" style="max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.sourceFile)}">${esc(e.sourceFile)}</td>
     <td><button class="flag-btn${e.status==='Flagged'?' on':''}" onclick="toggleFlag('${e.id}')">${e.status==='Flagged'?'⚑':'⚐'}</button></td>
   </tr>`).join('');
 }
@@ -1220,6 +1314,129 @@ function toggleFlag(id){
   e.status=e.status==='Flagged'?'Imported':'Flagged';
   applyFilters();updateStats();
   toast(e.status==='Flagged'?'Row flagged':'Row unflagged',e.status==='Flagged'?'w':'s');
+}
+
+// ─────────────────────────────────────────────────────────
+// HOURS BREAKDOWN
+// ─────────────────────────────────────────────────────────
+const bdExpanded = { clients: new Set(), projects: new Set() };
+
+function setVarFilter(btn){
+  document.querySelectorAll('.var-seg button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderBreakdown();
+}
+
+function renderBreakdown(){
+  const varFilter = document.querySelector('.var-seg button.active')?.dataset.var || 'all';
+  const container = document.getElementById('breakdownBody');
+  if(!container) return;
+
+  const filtered = allEntries.filter(e=>{
+    if(varFilter==='contracted') return !e.variation;
+    if(varFilter==='variation')  return !!e.variation;
+    return true;
+  });
+
+  if(!filtered.length){
+    container.innerHTML='<div class="empty" style="padding:16px">No data for current selection.</div>';
+    return;
+  }
+
+  // Build tree: client → project → item_no
+  const tree = {};
+  filtered.forEach(e=>{
+    const client  = e.client  || '(No Client)';
+    const project = e.project || '(No Project)';
+    const item    = e.item_no || '—';
+    const hrs     = e.hours   || 0;
+    const isVar   = !!e.variation;
+
+    if(!tree[client]) tree[client] = {c:0, v:0, projects:{}};
+    isVar ? tree[client].v+=hrs : tree[client].c+=hrs;
+
+    if(!tree[client].projects[project]) tree[client].projects[project] = {c:0, v:0, items:{}};
+    isVar ? tree[client].projects[project].v+=hrs : tree[client].projects[project].c+=hrs;
+
+    if(!tree[client].projects[project].items[item]) tree[client].projects[project].items[item] = {c:0, v:0};
+    isVar ? tree[client].projects[project].items[item].v+=hrs : tree[client].projects[project].items[item].c+=hrs;
+  });
+
+  // Max total for bar scaling
+  const maxTotal = Math.max(...Object.values(tree).map(cl=>cl.c+cl.v), 1);
+
+  const mkSplit = (c,v) => {
+    const parts = [];
+    if(c) parts.push(`<span class="bd-c">C:${c.toFixed(1)}</span>`);
+    if(v) parts.push(`<span class="bd-v">V:${v.toFixed(1)}</span>`);
+    return parts.join(' ');
+  };
+  const mkBar = (c,v,total) => {
+    const pct = Math.max((total/maxTotal)*100, 0.5);
+    const cf = c || 0.001, vf = v || 0.001;
+    return `<div class="bd-bar-wrap"><div class="bd-bar" style="width:${pct.toFixed(1)}%">
+      <div class="bd-seg contracted" style="flex:${cf}"></div>
+      <div class="bd-seg variation"  style="flex:${vf}"></div>
+    </div></div>`;
+  };
+
+  let html = '';
+  Object.entries(tree)
+    .sort((a,b)=>(b[1].c+b[1].v)-(a[1].c+a[1].v))
+    .forEach(([client, cdata])=>{
+      const total = cdata.c + cdata.v;
+      const expanded = bdExpanded.clients.has(client);
+      html += `<div class="bd-row bd-client" onclick="bdToggleClient('${esc(client)}')" title="${esc(client)}">
+        <div class="bd-chevron">${expanded?'▼':'▶'}</div>
+        <div class="bd-label">${esc(client)}</div>
+        ${mkBar(cdata.c,cdata.v,total)}
+        <div class="bd-total">${total.toFixed(1)}h</div>
+        <div class="bd-split">${mkSplit(cdata.c,cdata.v)}</div>
+      </div>`;
+      if(expanded){
+        Object.entries(cdata.projects)
+          .sort((a,b)=>(b[1].c+b[1].v)-(a[1].c+a[1].v))
+          .forEach(([project, pdata])=>{
+            const ptotal = pdata.c + pdata.v;
+            const pkey   = client+'||'+project;
+            const pExp   = bdExpanded.projects.has(pkey);
+            html += `<div class="bd-row bd-project" onclick="bdToggleProject('${esc(pkey)}')" title="${esc(project)}">
+              <div class="bd-chevron">${pExp?'▼':'▶'}</div>
+              <div class="bd-label">${esc(shortProj(project))}</div>
+              ${mkBar(pdata.c,pdata.v,ptotal)}
+              <div class="bd-total">${ptotal.toFixed(1)}h</div>
+              <div class="bd-split">${mkSplit(pdata.c,pdata.v)}</div>
+            </div>`;
+            if(pExp){
+              Object.entries(pdata.items)
+                .sort((a,b)=>(b[1].c+b[1].v)-(a[1].c+a[1].v))
+                .forEach(([item, idata])=>{
+                  const itotal = idata.c + idata.v;
+                  html += `<div class="bd-row bd-item" title="${esc(item)}">
+                    <div class="bd-chevron" style="color:var(--dim)">→</div>
+                    <div class="bd-label" style="color:var(--muted)">${esc(item)}</div>
+                    ${mkBar(idata.c,idata.v,itotal)}
+                    <div class="bd-total">${itotal.toFixed(1)}h</div>
+                    <div class="bd-split">${mkSplit(idata.c,idata.v)}</div>
+                  </div>`;
+                });
+            }
+          });
+      }
+    });
+
+  container.innerHTML = html;
+}
+
+function bdToggleClient(key){
+  if(bdExpanded.clients.has(key)) bdExpanded.clients.delete(key);
+  else bdExpanded.clients.add(key);
+  renderBreakdown();
+}
+function bdToggleProject(key){
+  if(bdExpanded.projects.has(key)) bdExpanded.projects.delete(key);
+  else bdExpanded.projects.add(key);
+  renderBreakdown();
 }
 
 // ─────────────────────────────────────────────────────────

@@ -4,9 +4,17 @@
  * Accepts a base64-encoded XLSX file from Make.com and returns
  * the data rows as a CSV string so Claude can read them as plain text.
  *
+ * Designed for the DKH controlled timesheet template:
+ *   Row 1: Title
+ *   Row 2: Name: [value]
+ *   Row 3: Wk Commencing: [date]   ISO Week: [auto]
+ *   Row 4: Instructions note
+ *   Row 5: Headers — #, Day, Date, Client, Project Reference, Item No., Category, Variation? (Y/N), Description, Hours
+ *   Rows 6+: Data
+ *
  * Called by Make as POST /.netlify/functions/parse-xlsx
  * Body: { data: "<base64 string>", filename: "file.xlsx" }
- * Returns: { csv: "Name,Date,Project,...\nGreig,...", rows: 12 }
+ * Returns: { csv: "...", rows: 12, person: "Greig Fensome", week_commencing: "2026-06-02", filename }
  */
 
 const XLSX = require('xlsx');
@@ -37,30 +45,55 @@ exports.handler = async (event) => {
     const buffer = Buffer.from(base64Data, 'base64');
     const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
 
-    // Use first sheet that isn't named _Lists or Instructions
+    // Use first sheet that isn't _Lists or Instructions
     const sheetName = workbook.SheetNames.find(
       (n) => !['_Lists', 'Instructions', '_lists', 'instructions'].includes(n)
     ) || workbook.SheetNames[0];
 
     const sheet = workbook.Sheets[sheetName];
 
-    // Convert to array of arrays (raw values, no headers yet)
+    // Convert to array of arrays
     const rows = XLSX.utils.sheet_to_json(sheet, {
       header: 1,
       defval: '',
-      raw: false,       // return formatted strings, not raw numbers
+      raw: false,
       dateNF: 'YYYY-MM-DD',
     });
 
     if (!rows || rows.length === 0) {
-      return respond(200, { csv: '', rows: 0, sheet: sheetName });
+      return respond(200, { csv: '', rows: 0, sheet: sheetName, filename });
     }
 
-    // Find the header row — first row where ≥3 cells are non-empty strings
-    let headerRowIdx = 0;
-    for (let i = 0; i < Math.min(rows.length, 15); i++) {
-      const nonEmpty = rows[i].filter((c) => String(c).trim().length > 0);
-      if (nonEmpty.length >= 3) {
+    // Extract metadata from header rows (DKH template structure)
+    // Row 2 (index 1): ["Name:", <value>, ...]
+    // Row 3 (index 2): ["Wk Commencing:", <date>, ..., "ISO Week", <value>]
+    let person = null;
+    let weekCommencing = null;
+
+    for (let i = 0; i < Math.min(rows.length, 6); i++) {
+      const r = rows[i];
+      const label = String(r[0] || '').trim().toLowerCase();
+      if (label === 'name:') {
+        person = String(r[1] || '').trim() || null;
+      }
+      if (label === 'wk commencing:') {
+        weekCommencing = String(r[1] || '').trim() || null;
+      }
+    }
+
+    // Fall back to extracting person from filename: YYYY-WXX_FirstnameSurname.xlsx
+    if (!person && filename) {
+      const match = filename.replace(/\.xlsx$/i, '').match(/^\d{4}-W\d+_(.+)$/i);
+      if (match) {
+        person = match[1].replace(/_/g, ' ');
+      }
+    }
+
+    // Find header row — the row containing "Day" and "Hours"
+    let headerRowIdx = 4; // default for DKH template
+    for (let i = 0; i < Math.min(rows.length, 10); i++) {
+      const cells = rows[i].map((c) => String(c).trim().toLowerCase());
+      if (cells.includes('day') && cells.includes('hours')) {
         headerRowIdx = i;
         break;
       }
@@ -88,6 +121,8 @@ exports.handler = async (event) => {
     return respond(200, {
       csv,
       rows: dataRows.length,
+      person,
+      week_commencing: weekCommencing,
       sheet: sheetName,
       filename,
     });
