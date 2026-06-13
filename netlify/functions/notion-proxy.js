@@ -178,14 +178,15 @@ async function handleValidateRelations(body, token) {
   }
 
   return respond(200, {
-    valid_rows:  validRows,
-    error_rows:  errorRows,
-    valid_count: validRows.length,
-    error_count: errorRows.length,
+    valid_rows:      validRows,
+    error_rows:      errorRows,
+    valid_count:     validRows.length,
+    error_count:     errorRows.length,
+    valid_rows_json: JSON.stringify(validRows),
     _debug: {
-      person_index_size: Object.keys(personIdx).length,
-      client_index_size: Object.keys(clientIdx).length,
-      item_index_size:   Object.keys(itemIdx).length,
+      person_index_size:  Object.keys(personIdx).length,
+      client_index_size:  Object.keys(clientIdx).length,
+      item_index_size:    Object.keys(itemIdx).length,
       project_index_size: Object.keys(projectIdx).length,
     },
   });
@@ -291,24 +292,4 @@ async function resolveRelationTitles(pages, token) {
 
 function notionHeaders(token) {
   return {
-    'Authorization': 'Bearer ' + token,
-    'Notion-Version': NOTION_VERSION,
-    'Content-Type': 'application/json',
-  };
-}
-
-function corsHeaders() {
-  return {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-  };
-}
-
-function respond(statusCode, body) {
-  return {
-    statusCode: statusCode,
-    headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders()),
-    body: JSON.stringify(body),
-  };
-}
+    'Authorization': 'Bearer ' + tok
