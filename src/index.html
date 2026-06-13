@@ -907,6 +907,24 @@ async function writeToNotion(){
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({files:sel.map(f=>f.name),triggered_at:new Date().toISOString()})
       });
+      let data={};
+      try{ data=await res.json(); }catch(_){}
+
+      // Validation errors — missing Person/Client/Item/Project in Notion
+      if(data.status==='validation_error' || res.status===422){
+        clearInterval(ticker);
+        progBar.style.width='100%';progBar.style.background='var(--red)';
+        statusEl.className='write-status-row err';
+        const errRows=data.errors||[];
+        const msgs=errRows.flatMap(r=>r.validation_errors||[]);
+        const unique=[...new Set(msgs)];
+        statusEl.innerHTML='<strong>Import blocked — fix these before re-importing:</strong><ul style="margin:6px 0 0 0;padding-left:18px">'
+          +unique.map(m=>'<li>'+m+'</li>').join('')+'</ul>';
+        writeBtn.disabled=false;
+        toast('Import blocked: '+unique.length+' validation error'+(unique.length!==1?'s':''),'e');
+        return;
+      }
+
       if(!res.ok) throw new Error('HTTP '+res.status);
     } else {
       await sleep(1800); // demo delay

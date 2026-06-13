@@ -30,6 +30,12 @@ if not exist ".git" (
   echo.
 )
 
+:: Remove stale git lock file if present (prevents commit failures after Claude edits)
+if exist ".git\index.lock" (
+  echo  [git] Removing stale index.lock...
+  del ".git\index.lock"
+)
+
 :: Show current status
 echo  [git] Current status:
 echo.
