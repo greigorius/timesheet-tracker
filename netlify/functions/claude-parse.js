@@ -139,7 +139,7 @@ exports.handler = async (event) => {
       ...row,
     }));
 
-    return respond(200, { rows, count: rows.length });
+    return respond(200, { rows, rows_json: JSON.stringify(rows), count: rows.length });
   } catch (err) {
     return respond(502, { error: 'Failed to reach Anthropic API', detail: err.message });
   }
