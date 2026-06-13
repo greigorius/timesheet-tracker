@@ -182,6 +182,12 @@ async function handleValidateRelations(body, token) {
     error_rows:  errorRows,
     valid_count: validRows.length,
     error_count: errorRows.length,
+    _debug: {
+      person_index_size: Object.keys(personIdx).length,
+      client_index_size: Object.keys(clientIdx).length,
+      item_index_size:   Object.keys(itemIdx).length,
+      project_index_size: Object.keys(projectIdx).length,
+    },
   });
 }
 
@@ -199,7 +205,10 @@ async function buildNameIndex(dbId, token) {
       'https://api.notion.com/v1/databases/' + dbId + '/query',
       { method: 'POST', headers: notionHeaders(token), body: JSON.stringify(payload) }
     );
-    if (!res.ok) break;
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(`DB ${dbId} query failed: ${res.status} ${errBody.message || errBody.code || ''}`);
+    }
     const data = await res.json();
     for (const page of (data.results || [])) {
       const titleProp = Object.values(page.properties || {}).find(p => p.type === 'title');
