@@ -41,7 +41,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 .icon-btn:hover{color:var(--text);border-color:var(--border2)}
 
 /* ── LAYOUT ── */
-.main{padding:16px 20px;max-width:1500px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.main{padding:16px 20px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
 
 /* ── PANEL ── */
 .panel{background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden}
@@ -1067,7 +1067,7 @@ async function fetchNotionEntries(){
       day:      getProp(['Day of Week','Day','Weekday'],'formula')
              || getProp(['Day of Week','Day','Weekday'],'select')
              || getProp(['Day of Week','Day','Weekday'],'rich_text'),
-      hours:    getProp(['Actual Hours','Hours','Hrs','Time'],'number'),
+      hours:    getProp(['Actual Hours Spent','Actual Hours','Hours','Hrs','Time'],'number'),
       status:   getProp(['Import Status','Status'],'select')
              || getProp(['Import Status','Status'],'rich_text'),
       sourceFile: getProp(['Source File','Source','File'],'rich_text'),
@@ -1396,7 +1396,7 @@ function applyFilters(){
   tbody.innerHTML=filtered.map(e=>`<tr>
     <td><span style="display:inline-flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:${getPersonColor(e.person)};display:inline-block;flex-shrink:0"></span>${esc(e.person)}</span></td>
     <td class="dim" style="max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.client)}">${esc(e.client)||'<span style="color:var(--dim)">—</span>'}</td>
-    <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)" title="${esc(e.project)}">${esc(shortProj(e.project))}</td>
+    <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)" title="${esc(e.project)}">${esc(e.project)||'<span style="color:var(--dim)">—</span>'}</td>
     <td class="mono dim" style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.item_no)}">${esc(e.item_no)||''}</td>
     <td class="mono dim">${esc(e.date)}</td>
     <td class="dim" style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.category)}">${esc(e.category)}</td>
