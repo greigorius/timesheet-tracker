@@ -223,7 +223,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 /* ── TABLE (import log) ── */
 .tbl-wrap{overflow-x:auto;max-height:420px;overflow-y:auto}
 table{width:100%;min-width:860px;border-collapse:collapse;font-size:12px;table-layout:fixed}
-thead th{font-family:var(--mono);font-size:10px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);background:var(--surface2);white-space:nowrap;position:sticky;top:0;z-index:1}
+thead th{font-family:var(--mono);font-size:10px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);background:var(--surface2);white-space:nowrap;position:sticky;top:0;z-index:1;overflow:visible}
+.col-resizer{position:absolute;right:-3px;top:0;width:6px;height:100%;cursor:col-resize;z-index:2;user-select:none}
+.col-resizer:hover,.col-resizer.dragging{background:var(--blue);opacity:.6}
 tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
 tbody tr:last-child{border-bottom:none}
 tbody tr:hover{background:var(--surface2)}
@@ -478,16 +480,24 @@ td.dim{color:var(--muted)}
     </div>
     <div class="tbl-wrap">
       <table>
-        <colgroup>
-          <col style="width:125px"><col style="width:80px"><col style="width:110px"><col style="width:82px">
-          <col style="width:88px"><col style="width:115px"><col style="width:40px">
-          <col><col style="width:46px"><col style="width:72px"><col style="width:88px"><col style="width:34px">
+        <colgroup id="logCols">
+          <col data-col="0"><col data-col="1"><col data-col="2"><col data-col="3">
+          <col data-col="4"><col data-col="5"><col data-col="6">
+          <col data-col="7"><col data-col="8"><col data-col="9"><col data-col="10"><col data-col="11">
         </colgroup>
         <thead><tr>
-          <th>Person</th><th>Client</th><th>Project</th><th>Item</th>
-          <th>Date</th><th>Cat</th><th style="text-align:center">Var</th>
-          <th>Desc</th><th style="text-align:right">Hrs</th>
-          <th>Status</th><th>Source</th><th></th>
+          <th>Person<div class="col-resizer" data-col="0"></div></th>
+          <th>Client<div class="col-resizer" data-col="1"></div></th>
+          <th>Project<div class="col-resizer" data-col="2"></div></th>
+          <th>Item<div class="col-resizer" data-col="3"></div></th>
+          <th>Date<div class="col-resizer" data-col="4"></div></th>
+          <th>Cat<div class="col-resizer" data-col="5"></div></th>
+          <th style="text-align:center">Var<div class="col-resizer" data-col="6"></div></th>
+          <th>Desc<div class="col-resizer" data-col="7"></div></th>
+          <th style="text-align:right">Hrs<div class="col-resizer" data-col="8"></div></th>
+          <th>Status<div class="col-resizer" data-col="9"></div></th>
+          <th>Source<div class="col-resizer" data-col="10"></div></th>
+          <th></th>
         </tr></thead>
         <tbody id="logBody"></tbody>
       </table>
@@ -545,7 +555,61 @@ function loadCfg(){
   document.getElementById('cfgWrite').value  = cfg.writeUrl;
   document.getElementById('cfgProxy').value  = cfg.proxyUrl;
   updateConnState();
+  applyColWidths();
 }
+
+// ─────────────────────────────────────────────────────────
+// COLUMN RESIZE
+// ─────────────────────────────────────────────────────────
+const DEFAULT_COL_WIDTHS = [125,80,110,82,88,115,40,null,46,72,88,34];
+function applyColWidths(){
+  const widths = cfg.colWidths || DEFAULT_COL_WIDTHS;
+  const cols = document.getElementById('logCols')?.children;
+  if(!cols) return;
+  for(let i=0;i<cols.length;i++){
+    const w = widths[i];
+    cols[i].style.width = w ? w+'px' : '';
+  }
+}
+(function initColResize(){
+  let dragging=false, startX=0, startW=0, colIdx=-1;
+  document.addEventListener('mousedown', e=>{
+    const h = e.target.closest('.col-resizer');
+    if(!h) return;
+    e.preventDefault();
+    colIdx = +h.dataset.col;
+    startX = e.clientX;
+    const cols = document.getElementById('logCols')?.children;
+    startW = cols ? (parseInt(getComputedStyle(cols[colIdx]).width)||DEFAULT_COL_WIDTHS[colIdx]||80) : 80;
+    dragging = true;
+    h.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+  document.addEventListener('mousemove', e=>{
+    if(!dragging) return;
+    const delta = e.clientX - startX;
+    const newW = Math.max(30, startW + delta);
+    const cols = document.getElementById('logCols')?.children;
+    if(cols && cols[colIdx]) cols[colIdx].style.width = newW+'px';
+  });
+  document.addEventListener('mouseup', e=>{
+    if(!dragging) return;
+    dragging = false;
+    document.querySelectorAll('.col-resizer.dragging').forEach(el=>el.classList.remove('dragging'));
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    // Save current widths
+    const cols = document.getElementById('logCols')?.children;
+    if(cols){
+      cfg.colWidths = Array.from(cols).map(c=>{
+        const w = parseInt(getComputedStyle(c).width);
+        return isNaN(w)||w<5 ? null : w;
+      });
+      localStorage.setItem('adl-ts-cfg', JSON.stringify(cfg));
+    }
+  });
+})();
 function saveSettings(){
   cfg.scanUrl  = document.getElementById('cfgScan').value.trim();
   cfg.writeUrl = document.getElementById('cfgWrite').value.trim();
@@ -969,9 +1033,11 @@ async function fetchNotionEntries(){
              || getProp(['Person','Name','Submitter'],'title')
              || getProp(['Person','Name','Submitter'],'rich_text'),
       // Client / Project / Item are relation properties in this DB
+      // Projects (formula) is a computed field in Notion that returns the project ref string
       client:   getProp(['Client'],'relation')
              || getProp(['Client'],'rich_text'),
-      project:  getProp(['Project'],'relation')
+      project:  getProp(['Projects'],'formula')
+             || getProp(['Project'],'relation')
              || getProp(['Project','Project Reference','Job','Scheme'],'rich_text')
              || getProp(['Project'],'title'),
       item_no:  getProp(['Item'],'relation')
