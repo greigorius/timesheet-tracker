@@ -295,14 +295,18 @@ td.dim{color:var(--muted)}
 .sdiv::before,.sdiv::after{content:'';flex:1;height:1px;background:var(--border)}
 
 /* ── BREAKDOWN ── */
-.bd-row{display:flex;align-items:center;gap:8px;padding:5px 14px;border-bottom:1px solid rgba(30,42,64,.5);transition:background .1s;min-height:30px}
+.bd-row{display:flex;align-items:center;padding:5px 14px;border-bottom:1px solid rgba(30,42,64,.5);transition:background .1s;min-height:30px}
 .bd-row.bd-client{background:rgba(30,42,64,.3);cursor:pointer}
-.bd-row.bd-project{cursor:pointer;padding-left:28px}
-.bd-row.bd-item{padding-left:50px}
+.bd-row.bd-project{cursor:pointer}
+.bd-row.bd-item{}
 .bd-row.bd-client:hover,.bd-row.bd-project:hover{background:var(--surface2)}
-.bd-chevron{font-size:9px;color:var(--muted);width:14px;flex-shrink:0;font-family:var(--mono);user-select:none}
-.bd-label{font-size:12px;color:var(--text);min-width:140px;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.bd-bar-wrap{flex:1;height:16px;display:flex;align-items:center;margin:0 8px}
+.bd-label-col{width:200px;flex-shrink:0;display:flex;align-items:center;justify-content:flex-end;gap:5px;padding-right:10px;overflow:hidden}
+.bd-chevron{font-size:9px;color:var(--muted);flex-shrink:0;font-family:var(--mono);user-select:none;line-height:1}
+.bd-ltext{font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+.bd-ltext.proj{color:var(--muted);font-size:11px}
+.bd-ltext.item{color:var(--dim);font-size:11px}
+.bd-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.bd-bar-wrap{flex:1;height:16px;display:flex;align-items:center;margin-right:8px}
 .bd-bar{height:100%;display:flex;border-radius:2px;overflow:hidden;min-width:3px}
 .bd-seg.contracted{background:var(--blue);height:100%}
 .bd-seg.variation{background:var(--amber);height:100%}
@@ -789,6 +793,7 @@ function renderFileList(files, importedSet=new Set()){
   if(!files.length){list.innerHTML='<div class="empty" style="padding:16px;color:var(--muted)">No files available — Dropbox /Timesheets/Inbox is empty.</div>';return;}
   list.innerHTML=files.map((f,i)=>{
     const duplicate = importedSet.has(f.name);
+    if(duplicate) return ''; // already imported → moved to Processed, hide from list
     const unverified = f.headers == null;
     const map = unverified ? {mapped:[],missing:[]} : mapHeaders(f.headers||[]);
     const ok      = !unverified && map.missing.length===0;
@@ -1396,7 +1401,7 @@ function applyFilters(){
   tbody.innerHTML=filtered.map(e=>`<tr>
     <td><span style="display:inline-flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:${getPersonColor(e.person)};display:inline-block;flex-shrink:0"></span>${esc(e.person)}</span></td>
     <td class="dim" style="max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.client)}">${esc(e.client)||'<span style="color:var(--dim)">—</span>'}</td>
-    <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)" title="${esc(e.project)}">${esc(e.project)||'<span style="color:var(--dim)">—</span>'}</td>
+    <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)" title="${esc(e.project)}">${e.project?`<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:6px;height:6px;border-radius:50%;background:${getProjColor(e.project)};display:inline-block;flex-shrink:0"></span>${esc(e.project)}</span>`:'<span style="color:var(--dim)">—</span>'}</td>
     <td class="mono dim" style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.item_no)}">${esc(e.item_no)||''}</td>
     <td class="mono dim">${esc(e.date)}</td>
     <td class="dim" style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.category)}">${esc(e.category)}</td>
@@ -1482,39 +1487,47 @@ function renderBreakdown(){
 
   let html = '';
   Object.entries(tree)
-    .sort((a,b)=>(b[1].c+b[1].v)-(a[1].c+a[1].v))
+    .sort((a,b)=>a[0].localeCompare(b[0]))
     .forEach(([client, cdata])=>{
       const total = cdata.c + cdata.v;
       const expanded = bdExpanded.clients.has(client);
       html += `<div class="bd-row bd-client" onclick="bdToggleClient('${esc(client)}')" title="${esc(client)}">
-        <div class="bd-chevron">${expanded?'▼':'▶'}</div>
-        <div class="bd-label">${esc(client)}</div>
+        <div class="bd-label-col">
+          <div class="bd-ltext">${esc(client)}</div>
+          <div class="bd-chevron">${expanded?'▼':'▶'}</div>
+        </div>
         ${mkBar(cdata.c,cdata.v,total)}
         <div class="bd-total">${total.toFixed(1)}h</div>
         <div class="bd-split">${mkSplit(cdata.c,cdata.v)}</div>
       </div>`;
       if(expanded){
         Object.entries(cdata.projects)
-          .sort((a,b)=>(b[1].c+b[1].v)-(a[1].c+a[1].v))
+          .sort((a,b)=>a[0].localeCompare(b[0]))
           .forEach(([project, pdata])=>{
             const ptotal = pdata.c + pdata.v;
             const pkey   = client+'||'+project;
             const pExp   = bdExpanded.projects.has(pkey);
+            const pColor = getProjColor(project);
             html += `<div class="bd-row bd-project" onclick="bdToggleProject('${esc(pkey)}')" title="${esc(project)}">
-              <div class="bd-chevron">${pExp?'▼':'▶'}</div>
-              <div class="bd-label">${esc(shortProj(project))}</div>
+              <div class="bd-label-col">
+                <div class="bd-dot" style="background:${pColor}"></div>
+                <div class="bd-ltext proj">${esc(shortProj(project))}</div>
+                <div class="bd-chevron">${pExp?'▼':'▶'}</div>
+              </div>
               ${mkBar(pdata.c,pdata.v,ptotal)}
               <div class="bd-total">${ptotal.toFixed(1)}h</div>
               <div class="bd-split">${mkSplit(pdata.c,pdata.v)}</div>
             </div>`;
             if(pExp){
               Object.entries(pdata.items)
-                .sort((a,b)=>(b[1].c+b[1].v)-(a[1].c+a[1].v))
+                .sort((a,b)=>a[0].localeCompare(b[0]))
                 .forEach(([item, idata])=>{
                   const itotal = idata.c + idata.v;
                   html += `<div class="bd-row bd-item" title="${esc(item)}">
-                    <div class="bd-chevron" style="color:var(--dim)">→</div>
-                    <div class="bd-label" style="color:var(--muted)">${esc(item)}</div>
+                    <div class="bd-label-col">
+                      <div class="bd-ltext item">${esc(item)}</div>
+                      <div class="bd-chevron" style="color:var(--dim)">→</div>
+                    </div>
                     ${mkBar(idata.c,idata.v,itotal)}
                     <div class="bd-total">${itotal.toFixed(1)}h</div>
                     <div class="bd-split">${mkSplit(idata.c,idata.v)}</div>
