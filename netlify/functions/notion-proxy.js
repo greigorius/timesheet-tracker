@@ -292,4 +292,24 @@ async function resolveRelationTitles(pages, token) {
 
 function notionHeaders(token) {
   return {
-    'Authorization': 'Bearer ' + tok
+    'Authorization': 'Bearer ' + token,
+    'Notion-Version': NOTION_VERSION,
+    'Content-Type': 'application/json',
+  };
+}
+
+function corsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
+}
+
+function respond(statusCode, body) {
+  return {
+    statusCode: statusCode,
+    headers: Object.assign({ 'Content-Type': 'application/json' }, corsHeaders()),
+    body: JSON.stringify(body),
+  };
+}
