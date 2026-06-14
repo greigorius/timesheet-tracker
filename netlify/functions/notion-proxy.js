@@ -276,20 +276,30 @@ async function resolveRelationTitles(pages, token) {
 
   if (!relIds.size) return;
 
+  // Notion rate limit: ~3 req/s. Fetch in batches of 3 with a gap between batches.
   const titleMap = {};
-  await Promise.allSettled(
-    [...relIds].map(async id => {
-      try {
-        const r = await fetch('https://api.notion.com/v1/pages/' + id, {
-          headers: notionHeaders(token),
-        });
-        if (!r.ok) return;
-        const p = await r.json();
-        const titleProp = Object.values(p.properties || {}).find(v => v.type === 'title');
-        titleMap[id] = (titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text) || id;
-      } catch { /* silently skip */ }
-    })
-  );
+  const ids = [...relIds];
+  const BATCH = 3;
+  const DELAY = 400; // ms between batches
+
+  for (let i = 0; i < ids.length; i += BATCH) {
+    await Promise.allSettled(
+      ids.slice(i, i + BATCH).map(async id => {
+        try {
+          const r = await fetch('https://api.notion.com/v1/pages/' + id, {
+            headers: notionHeaders(token),
+          });
+          if (!r.ok) return;
+          const p = await r.json();
+          const titleProp = Object.values(p.properties || {}).find(v => v.type === 'title');
+          titleMap[id] = (titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text) || id;
+        } catch { /* silently skip */ }
+      })
+    );
+    if (i + BATCH < ids.length) {
+      await new Promise(r => setTimeout(r, DELAY));
+    }
+  }
 
   pages.forEach(page => {
     Object.values(page.properties || {}).forEach(prop => {
