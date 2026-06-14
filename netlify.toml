@@ -6,9 +6,6 @@
 [build.environment]
   NODE_VERSION = "20"
 
-[functions]
-  timeout = 26
-
 # SPA fallback — serve index.html for any unmatched route
 # (must come AFTER functions so /.netlify/functions/* is not caught)
 [[redirects]]
