@@ -62,7 +62,7 @@ exports.handler = async (event) => {
     const data = await res.json();
     if (!res.ok) return respond(res.status, data);
     if (data.results && data.results.length > 0) {
-      await resolveRelationTitles(data.results, token);
+      await resolveRelationTitles(data.results, token, databaseId);
     }
     return respond(200, data);
   } catch (err) {
@@ -263,44 +263,60 @@ function findInIndex(index, searchValue, matchType) {
 // ---------------------------------------------------------------------------
 // RELATION TITLE RESOLUTION (query mode)
 // ---------------------------------------------------------------------------
-
-async function resolveRelationTitles(pages, token) {
-  const relIds = new Set();
-  pages.forEach(page => {
-    Object.values(page.properties || {}).forEach(prop => {
-      if (prop.type === 'relation') {
-        (prop.relation || []).forEach(rel => relIds.add(rel.id));
-      }
+//
+// Strategy: query each related DB once (up to 100 records per page) to build
+// an id→name map, then stamp _title onto every relation entry in the results.
+// This replaces the old approach of one /v1/pages/{id} call per unique relation
+// ID, which could hit 50–100+ calls and blow the 10-second Netlify timeout.
+//
+async function resolveRelationTitles(pages, token, sourceDbId) {
+  // 1. Find which DB IDs appear as relation targets in this DB's schema.
+  //    We need the schema to map relation prop → database_id.
+  let relDbIds = [];
+  try {
+    const schemaRes = await fetch('https://api.notion.com/v1/databases/' + sourceDbId, {
+      headers: notionHeaders(token),
     });
-  });
-
-  if (!relIds.size) return;
-
-  // Notion rate limit: ~3 req/s. Fetch in batches of 3 with a gap between batches.
-  const titleMap = {};
-  const ids = [...relIds];
-  const BATCH = 3;
-  const DELAY = 400; // ms between batches
-
-  for (let i = 0; i < ids.length; i += BATCH) {
-    await Promise.allSettled(
-      ids.slice(i, i + BATCH).map(async id => {
-        try {
-          const r = await fetch('https://api.notion.com/v1/pages/' + id, {
-            headers: notionHeaders(token),
-          });
-          if (!r.ok) return;
-          const p = await r.json();
-          const titleProp = Object.values(p.properties || {}).find(v => v.type === 'title');
-          titleMap[id] = (titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text) || id;
-        } catch { /* silently skip */ }
-      })
-    );
-    if (i + BATCH < ids.length) {
-      await new Promise(r => setTimeout(r, DELAY));
+    if (schemaRes.ok) {
+      const schema = await schemaRes.json();
+      const seen = new Set();
+      Object.values(schema.properties || {}).forEach(prop => {
+        const dbId = prop.type === 'relation' && prop.relation && prop.relation.database_id;
+        if (dbId && !seen.has(dbId)) { seen.add(dbId); relDbIds.push(dbId); }
+      });
     }
+  } catch { /* fall through — titleMap stays empty */ }
+
+  if (!relDbIds.length) return;
+
+  // 2. For each related DB, fetch all pages (paginated) and build id→name map.
+  const titleMap = {};
+  for (const dbId of relDbIds) {
+    let cursor;
+    do {
+      try {
+        const payload = { page_size: 100 };
+        if (cursor) payload.start_cursor = cursor;
+        const r = await fetch('https://api.notion.com/v1/databases/' + dbId + '/query', {
+          method: 'POST',
+          headers: notionHeaders(token),
+          body: JSON.stringify(payload),
+        });
+        if (!r.ok) break;
+        const data = await r.json();
+        (data.results || []).forEach(page => {
+          const titleProp = Object.values(page.properties || {}).find(p => p.type === 'title');
+          const name = titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text;
+          if (name) titleMap[page.id] = name;
+        });
+        cursor = data.has_more ? data.next_cursor : null;
+      } catch { break; }
+    } while (cursor);
   }
 
+  if (!Object.keys(titleMap).length) return;
+
+  // 3. Stamp _title onto every relation entry in the returned pages.
   pages.forEach(page => {
     Object.values(page.properties || {}).forEach(prop => {
       if (prop.type === 'relation') {
