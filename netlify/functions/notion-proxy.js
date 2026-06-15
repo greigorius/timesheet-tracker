@@ -128,63 +128,74 @@ async function handleValidateRelations(body, token) {
     return respond(502, { error: 'Failed to build lookup indexes', detail: err.message });
   }
 
-  // Validate each row.
-  // Hard errors (person/client not found)  → errorRows  (row is NOT imported)
-  // Soft warnings (item not found)         → validRows with import_status="Flagged"
-  //   The user can manually link the Item in Notion afterwards.
-  const validRows  = [];
-  const errorRows  = [];
+  // Person not resolved → hard fail (entire file rejected).
+  //   Person comes from the filename so this should never happen in practice,
+  //   but if it does the file needs fixing before re-import.
+  // Client / Project / Item not resolved → soft warning.
+  //   The row is imported with those relation fields blank and Import Status = "Flagged"
+  //   so the user can fix the links in Notion manually.
+  const validRows = [];
+  const errorRows = [];
 
   for (const row of rows) {
-    const errors   = [];   // hard failures — row is rejected
-    const warnings = [];   // soft warnings — row is imported but flagged
-    const out      = Object.assign({}, row);
-    out.import_status = ''; // default: no flag
+    const errors   = []; // hard — row is rejected
+    const warnings = []; // soft — row is imported but flagged
+    const out = Object.assign({}, row);
+    out.import_status = '';
 
+    // Person — hard error if missing or unresolved
     if (row.person) {
       const id = findInIndex(personIdx, row.person, 'exact');
-      if (id) out.person_id = id;
-      else errors.push('Person "' + row.person + '" not found in Notion -- add them to the People database first');
+      if (id) {
+        out.person_id = id;
+      } else {
+        errors.push('Person "' + row.person + '" not found — add them to the People database first');
+      }
     } else {
-      errors.push('Row is missing a Person value');
+      errors.push('Row has no Person value');
     }
 
+    // Client — soft warning
     if (row.client) {
       const id = findInIndex(clientIdx, row.client, 'fuzzy');
-      if (id) out.client_id = id;
-      else errors.push('Client "' + row.client + '" not found in Notion -- add them to the Clients database first');
+      if (id) {
+        out.client_id = id;
+      } else {
+        warnings.push('Client "' + row.client + '" not found — left blank for manual update');
+        out.client_id = null;
+      }
     } else {
-      errors.push('Row is missing a Client value');
+      out.client_id = null;
     }
 
+    // Item — soft warning
     if (row.item_no) {
       const id = findInIndex(itemIdx, row.item_no, 'contains');
       if (id) {
         out.item_id = id;
       } else {
-        // Soft warning: import the row but mark it for manual review
-        warnings.push('Item "' + row.item_no + '" not found in Notion -- link it manually or add it to the Items database');
+        warnings.push('Item "' + row.item_no + '" not found — left blank for manual update');
         out.item_id = null;
-        out.import_status = 'Flagged';
       }
     } else {
-      warnings.push('Row is missing an Item value -- link it manually in Notion');
       out.item_id = null;
-      out.import_status = 'Flagged';
     }
 
-    // Project: soft warning only — it populates via rollup from Item relation.
+    // Project — informational only (populated via rollup from Item relation)
     if (row.project && projectsDbId && Object.keys(projectIdx).length > 0) {
       const id = findInIndex(projectIdx, row.project, 'contains');
       if (!id) {
-        warnings.push('Project "' + row.project + '" not found in Notion -- add it to the Projects database first');
+        warnings.push('Project "' + row.project + '" not found in the Projects database');
       }
     }
 
     if (errors.length > 0) {
       errorRows.push(Object.assign({}, row, { validation_errors: errors }));
     } else {
-      if (warnings.length > 0) out.validation_warnings = warnings;
+      if (warnings.length > 0) {
+        out.import_status = 'Flagged';
+        out.validation_warnings = warnings;
+      }
       validRows.push(out);
     }
   }
