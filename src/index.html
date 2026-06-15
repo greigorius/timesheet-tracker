@@ -237,9 +237,6 @@ td.dim{color:var(--muted)}
 .sp.flagged{background:var(--amber-dim);color:var(--amber)}
 .sp.error{background:var(--red-dim);color:var(--red)}
 .sp.duplicate{background:var(--surface2);color:var(--dim);border:1px solid var(--border)}
-.flag-btn{background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:2px;cursor:pointer;transition:all .15s}
-.flag-btn:hover{border-color:var(--amber);color:var(--amber);background:var(--amber-dim)}
-.flag-btn.on{border-color:var(--amber);color:var(--amber);background:var(--amber-dim)}
 
 /* filter bar */
 .fbar{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--surface2);flex-wrap:wrap}
@@ -487,7 +484,7 @@ td.dim{color:var(--muted)}
         <colgroup id="logCols">
           <col data-col="0"><col data-col="1"><col data-col="2"><col data-col="3">
           <col data-col="4"><col data-col="5"><col data-col="6">
-          <col data-col="7"><col data-col="8"><col data-col="9"><col data-col="10"><col data-col="11">
+          <col data-col="7"><col data-col="8"><col data-col="9"><col data-col="10">
         </colgroup>
         <thead><tr>
           <th>Person<div class="col-resizer" data-col="0"></div></th>
@@ -501,7 +498,6 @@ td.dim{color:var(--muted)}
           <th style="text-align:right">Hrs<div class="col-resizer" data-col="8"></div></th>
           <th>Status<div class="col-resizer" data-col="9"></div></th>
           <th>Source<div class="col-resizer" data-col="10"></div></th>
-          <th></th>
         </tr></thead>
         <tbody id="logBody"></tbody>
       </table>
@@ -565,7 +561,7 @@ function loadCfg(){
 // ─────────────────────────────────────────────────────────
 // COLUMN RESIZE
 // ─────────────────────────────────────────────────────────
-const DEFAULT_COL_WIDTHS = [125,80,110,82,88,115,40,null,46,72,88,34];
+const DEFAULT_COL_WIDTHS = [125,80,110,82,88,115,40,null,46,72,88];
 function applyColWidths(){
   const widths = cfg.colWidths || DEFAULT_COL_WIDTHS;
   const cols = document.getElementById('logCols')?.children;
@@ -946,14 +942,15 @@ async function writeToNotion(){
     toast(sel.length+' file'+(sel.length>1?'s':'')+' sent to Make.com','s');
     await sleep(1200);
     loadData(); // refresh log
+    // Refresh file list so imported files disappear
+    const updatedImported = await fetchImportedFiles();
+    renderFileList(scannedFiles, updatedImported);
     // reset trigger after delay
     setTimeout(()=>{
       progWrap.style.display='none';
       statusEl.textContent='';
       writeBtn.disabled=false;
       document.getElementById('selectedSummary').innerHTML='<div style="font-size:11px;color:var(--dim)">No files selected yet.</div>';
-      document.querySelectorAll('.file-row input[type=checkbox]').forEach(cb=>cb.checked=false);
-      document.querySelectorAll('.file-row').forEach(r=>r.classList.remove('selected'));
       document.getElementById('selAll').checked=false;
       updateSelCount();
     },3000);
@@ -1429,7 +1426,7 @@ function applyFilters(){
   document.getElementById('fCount').textContent=filtered.length+' rows'+(allEntries.length!==filtered.length?' (filtered)':'')+(allEntries.length&&!document.getElementById('cfgProxy').value?' · demo':'');
   const tbody=document.getElementById('logBody');
   if(!filtered.length){
-    tbody.innerHTML='<tr><td colspan="12"><div class="empty">No entries match the current filters</div></td></tr>';
+    tbody.innerHTML='<tr><td colspan="11"><div class="empty">No entries match the current filters</div></td></tr>';
     return;
   }
   const statusClass={Imported:'imported',Flagged:'flagged',Duplicate:'duplicate',Error:'error'};
@@ -1445,15 +1442,7 @@ function applyFilters(){
     <td class="mono" style="text-align:right">${e.hours!=null?e.hours:'<span style="color:var(--red)">—</span>'}</td>
     <td><span class="sp ${statusClass[e.status]||'imported'}">${esc(e.status)}</span></td>
     <td class="mono dim" style="max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.sourceFile)}">${esc(e.sourceFile)}</td>
-    <td><button class="flag-btn${e.status==='Flagged'?' on':''}" onclick="toggleFlag('${e.id}')">${e.status==='Flagged'?'⚑':'⚐'}</button></td>
   </tr>`).join('');
-}
-function toggleFlag(id){
-  const e=allEntries.find(x=>x.id===id);
-  if(!e) return;
-  e.status=e.status==='Flagged'?'Imported':'Flagged';
-  applyFilters();updateStats();
-  toast(e.status==='Flagged'?'Row flagged':'Row unflagged',e.status==='Flagged'?'w':'s');
 }
 
 // ─────────────────────────────────────────────────────────
