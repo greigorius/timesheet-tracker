@@ -32,6 +32,13 @@ Rules:
 - Hours: output as a number (float)
 - All other string fields: trim whitespace, preserve case
 - If a field is blank, output null (not empty string)
+- Client, Project Reference, and Item No. are often abbreviated in the XLSX — output them EXACTLY as written, do not expand or guess the full name.
+  Examples of valid abbreviations to pass through unchanged:
+    Client:   "TMJ"         (may refer to "TMJ Interiors")
+    Project:  "24-354"      (may refer to "24-354 - EIT Auditorium")
+    Project:  "EIT Auditorium" (may refer to "24-354 - EIT Auditorium")
+    Item No.: "003"         (may refer to "SK-003" or "DR-003")
+    Item No.: "SK-003"      (exact item code — pass through as-is)
 
 Output format — return ONLY a raw JSON array, no markdown fences, no explanation:
 [

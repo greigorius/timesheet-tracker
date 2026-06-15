@@ -150,7 +150,7 @@ async function handleValidateRelations(body, token) {
     }
 
     if (row.client) {
-      const id = findInIndex(clientIdx, row.client, 'exact');
+      const id = findInIndex(clientIdx, row.client, 'fuzzy');
       if (id) out.client_id = id;
       else errors.push('Client "' + row.client + '" not found in Notion -- add them to the Clients database first');
     } else {
@@ -175,7 +175,7 @@ async function handleValidateRelations(body, token) {
 
     // Project: soft warning only — it populates via rollup from Item relation.
     if (row.project && projectsDbId && Object.keys(projectIdx).length > 0) {
-      const id = findInIndex(projectIdx, row.project, 'starts-with');
+      const id = findInIndex(projectIdx, row.project, 'contains');
       if (!id) {
         warnings.push('Project "' + row.project + '" not found in Notion -- add it to the Projects database first');
       }
@@ -234,29 +234,54 @@ async function buildNameIndex(dbId, token) {
 }
 
 /**
- * Looks up a search value in a name index using progressive matching:
- *   'exact'       -- case-insensitive exact
- *   'contains'    -- index key contains the value (for items with project prefixes)
- *   'starts-with' -- index key starts with the value (for project refs like "24-354")
+ * Looks up a search value in a name index using a progressive cascade.
+ * Each match type is a superset of the one before it.
+ *
+ *   'exact'      — case-insensitive exact only
+ *   'starts-with'— + key starts with search  ("24-354" → "24-354 - EIT Auditorium")
+ *   'contains'   — + key contains search     ("003" → "SK-003", "EIT Auditorium" → "24-354 - EIT Auditorium")
+ *   'fuzzy'      — + search contains key     ("TMJ Interiors" in sheet → "TMJ" in Notion)
+ *
+ * Call-site usage:
+ *   Person  → 'exact'      (names must match)
+ *   Client  → 'fuzzy'      ("TMJ" matches "TMJ Interiors" and vice-versa)
+ *   Item    → 'contains'   ("003" matches "SK-003")
+ *   Project → 'contains'   ("24-354" OR "EIT Auditorium" both match "24-354 - EIT Auditorium")
  */
 function findInIndex(index, searchValue, matchType) {
+  if (!searchValue) return null;
   const search = searchValue.trim();
   const lower  = search.toLowerCase();
   const entries = Object.entries(index);
 
+  // Pass 1 — exact (case-insensitive)
   for (const [key, id] of entries) {
     if (key.toLowerCase() === lower) return id;
   }
-  if (matchType === 'contains') {
-    for (const [key, id] of entries) {
-      if (key.toLowerCase().includes(lower)) return id;
-    }
+  if (matchType === 'exact') return null;
+
+  // Pass 2 — key starts with search
+  //   "24-354" → "24-354 - EIT Auditorium"
+  //   "TMJ"    → "TMJ Interiors"
+  for (const [key, id] of entries) {
+    if (key.toLowerCase().startsWith(lower)) return id;
   }
-  if (matchType === 'starts-with') {
-    for (const [key, id] of entries) {
-      if (key.toLowerCase().startsWith(lower)) return id;
-    }
+  if (matchType === 'starts-with') return null;
+
+  // Pass 3 — key contains search
+  //   "003"            → "SK-003"
+  //   "EIT Auditorium" → "24-354 - EIT Auditorium"
+  for (const [key, id] of entries) {
+    if (key.toLowerCase().includes(lower)) return id;
   }
+  if (matchType === 'contains') return null;
+
+  // Pass 4 — search contains key (fuzzy only, min key length 3 to avoid noise)
+  //   "TMJ Interiors" in sheet → "TMJ" in Notion
+  for (const [key, id] of entries) {
+    if (key.length >= 3 && lower.includes(key.toLowerCase())) return id;
+  }
+
   return null;
 }
 
