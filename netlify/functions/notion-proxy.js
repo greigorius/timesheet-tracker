@@ -111,18 +111,20 @@ async function handleValidateRelations(body, token) {
     return respond(500, { error: 'Could not find relation DBs for: ' + missing.join(', ') });
   }
 
-  // Build name->id indexes in parallel
+  // Build name->id indexes in parallel.
+  // Items use a richer index [{name, id, projectIds}] so duplicate item numbers
+  // across different projects can be disambiguated using row.project.
   let personIdx, clientIdx, itemIdx, projectIdx;
   try {
     const results = await Promise.all([
       buildNameIndex(personDbId, token),
       buildNameIndex(clientDbId, token),
-      buildNameIndex(itemDbId,   token),
+      buildItemIndexWithProjects(itemDbId, token),
       projectsDbId ? buildNameIndex(projectsDbId, token) : Promise.resolve({}),
     ]);
     personIdx  = results[0];
     clientIdx  = results[1];
-    itemIdx    = results[2];
+    itemIdx    = results[2]; // array of {name, id, projectIds[]}
     projectIdx = results[3];
   } catch (err) {
     return respond(502, { error: 'Failed to build lookup indexes', detail: err.message });
@@ -168,9 +170,11 @@ async function handleValidateRelations(body, token) {
       out.client_id = null;
     }
 
-    // Item — soft warning
+    // Item — soft warning.
+    // Uses project context to disambiguate when the same item number exists
+    // on multiple projects (e.g. "001" → "SK-001" on Project A vs "DR-001" on Project B).
     if (row.item_no) {
-      const id = findInIndex(itemIdx, row.item_no, 'contains');
+      const id = findItemInIndex(itemIdx, row.item_no, row.project, projectIdx);
       if (id) {
         out.item_id = id;
       } else {
@@ -209,7 +213,7 @@ async function handleValidateRelations(body, token) {
     _debug: {
       person_index_size:  Object.keys(personIdx).length,
       client_index_size:  Object.keys(clientIdx).length,
-      item_index_size:    Object.keys(itemIdx).length,
+      item_index_size:    itemIdx.length,
       project_index_size: Object.keys(projectIdx).length,
     },
   });
@@ -242,6 +246,120 @@ async function buildNameIndex(dbId, token) {
     cursor = data.has_more ? data.next_cursor : null;
   } while (cursor);
   return index;
+}
+
+/**
+ * Like buildNameIndex but returns an array of {name, id, projectIds[]} so that
+ * duplicate item numbers (e.g. "001" on multiple projects) can be disambiguated
+ * by cross-referencing the item's project relation IDs against the project index.
+ */
+async function buildItemIndexWithProjects(dbId, token) {
+  const items = [];
+  let cursor;
+  do {
+    const payload = { page_size: 100 };
+    if (cursor) payload.start_cursor = cursor;
+    const res = await fetch(
+      'https://api.notion.com/v1/databases/' + dbId + '/query',
+      { method: 'POST', headers: notionHeaders(token), body: JSON.stringify(payload) }
+    );
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error('DB ' + dbId + ' query failed: ' + res.status + ' ' + (errBody.message || errBody.code || ''));
+    }
+    const data = await res.json();
+    for (const page of (data.results || [])) {
+      const titleProp = Object.values(page.properties || {}).find(p => p.type === 'title');
+      const name = titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text;
+      if (name) {
+        const projectIds = [];
+        Object.values(page.properties || {}).forEach(prop => {
+          if (prop.type === 'relation') {
+            (prop.relation || []).forEach(r => projectIds.push(r.id));
+          }
+        });
+        items.push({ name: name.trim(), id: page.id, projectIds });
+      }
+    }
+    cursor = data.has_more ? data.next_cursor : null;
+  } while (cursor);
+  return items;
+}
+
+/**
+ * Extracts the item code from an item name.
+ * The separator between code and description is " - " (space-dash-space).
+ * If no such separator exists, the full name is the code.
+ *
+ * Examples:
+ *   "081 - CLG-111 Ceiling"   → "081"
+ *   "24-354 - EIT Auditorium" → "24-354"
+ *   "SK-003"                  → "SK-003"   (no " - " present)
+ *   "F13_9"                   → "F13_9"
+ *   "003"                     → "003"
+ *
+ * This means contains/fuzzy matching is anchored to the item code and cannot
+ * accidentally match numbers embedded in the descriptive part.
+ * e.g. search "111" must NOT match "081 - CLG-111 Ceiling" (code = "081").
+ */
+function itemCodePrefix(name) {
+  const sep = name.indexOf(' - ');
+  return (sep === -1 ? name : name.slice(0, sep)).trim();
+}
+
+/**
+ * Finds an item in the rich item index [{name, id, projectIds}].
+ *
+ * 4-pass cascade — each pass runs against the appropriate portion of the name:
+ *   Pass 1 — exact match on full name           ("SK-003"  → "SK-003")
+ *   Pass 2 — full name starts with search       ("24-354"  → "24-354 - EIT Auditorium")
+ *   Pass 3 — code prefix contains search        ("003"     → item whose code is "003")
+ *   Pass 4 — search contains code prefix        ("SK"      → item named "SK-003" when user types "SK")
+ *             (fuzzy, min prefix length 3 to avoid noise)
+ *
+ * Passes 3 and 4 use only the code prefix so that descriptive text after the
+ * first separator (e.g. " Ceiling" in "081 - CLG-111 Ceiling") is never matched.
+ *
+ * When multiple candidates survive any pass, project context is used to
+ * disambiguate (same item number on different projects).
+ */
+function findItemInIndex(items, searchValue, projectSearchValue, projectIdx) {
+  if (!searchValue) return null;
+  const search = searchValue.trim().toLowerCase();
+
+  const passes = [
+    // Pass 1 — full name exact
+    item => item.name.toLowerCase() === search,
+    // Pass 2 — full name starts with search
+    item => item.name.toLowerCase().startsWith(search),
+    // Pass 3 — code prefix contains search (description-safe)
+    item => itemCodePrefix(item.name).toLowerCase().includes(search),
+    // Pass 4 — search contains code prefix, min 3 chars (description-safe fuzzy)
+    item => {
+      const prefix = itemCodePrefix(item.name).toLowerCase();
+      return prefix.length >= 3 && search.includes(prefix);
+    },
+  ];
+
+  for (const matchFn of passes) {
+    const candidates = items.filter(matchFn);
+    if (!candidates.length) continue;
+    if (candidates.length === 1) return candidates[0].id;
+
+    // Multiple candidates — try to pick the one whose project matches row.project
+    if (projectSearchValue && projectIdx) {
+      const projId = findInIndex(projectIdx, projectSearchValue, 'contains');
+      if (projId) {
+        const match = candidates.find(c => c.projectIds.includes(projId));
+        if (match) return match.id;
+      }
+    }
+
+    // Still ambiguous — return the first match rather than failing
+    return candidates[0].id;
+  }
+
+  return null;
 }
 
 /**
