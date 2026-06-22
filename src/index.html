@@ -969,11 +969,14 @@ function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
 // DATA
 // ─────────────────────────────────────────────────────────
 let allEntries=[];
-let _loadingMore = false;
+// Incremented each time loadData() starts; streamNotionEntries checks its own
+// copy and aborts if a newer load has started — prevents a stale stream from
+// overwriting data when the user reloads while a fetch is in progress.
+let _loadGen = 0;
 
 async function loadData(){
   allEntries = [];
-  _loadingMore = false;
+  const gen = ++_loadGen;
   // Show immediate loading state in the table
   document.getElementById('logBody').innerHTML =
     '<tr><td colspan="12"><div class="empty"><span class="spin"></span> Loading…</div></td></tr>';
@@ -984,8 +987,9 @@ async function loadData(){
   const useLive = cfg.proxyUrl === DEFAULT_PROXY || (cfg.proxyUrl && cfg.proxyUrl !== DEFAULT_PROXY);
   if(useLive){
     try{
-      await streamNotionEntries(onPageLoaded);
+      await streamNotionEntries(onPageLoaded, gen);
     }catch(e){
+      if(_loadGen !== gen) return; // superseded — discard
       console.warn('Notion fetch failed, falling back to demo data:', e.message);
       allEntries = demoEntries();
       _renderAll();
@@ -994,7 +998,6 @@ async function loadData(){
     allEntries = demoEntries();
     _renderAll();
   }
-  _loadingMore = false;
 }
 
 function onPageLoaded(newEntries){
@@ -1018,13 +1021,14 @@ function _renderAll(){
 
 // Streams pages from Notion one at a time, calling onPage(entries[]) after each.
 // Pages arrive newest-first (sorted by Date descending) so the UI is immediately useful.
-async function streamNotionEntries(onPage){
+// gen: the load-generation token from loadData(); if _loadGen advances, this stream aborts.
+async function streamNotionEntries(onPage, gen){
   const proxy = cfg.proxyUrl || DEFAULT_PROXY;
   let startCursor = undefined;
   let hasMore = true;
   let pageNum = 0;
-  _loadingMore = true;
-  while(hasMore && _loadingMore !== false){
+  while(hasMore){
+    if(_loadGen !== gen) { console.log('[stream] superseded at page', pageNum, '— aborting'); return; }
     pageNum++;
     const payload = {
       db: 'timesheets',
@@ -1040,15 +1044,17 @@ async function streamNotionEntries(onPage){
     if(!res.ok) throw new Error('Proxy returned '+res.status);
     const data = await res.json();
     if(!data.results) throw new Error('Unexpected response shape');
+    if(_loadGen !== gen) { console.log('[stream] superseded after page', pageNum, '— discarding'); return; }
     onPage(data.results.map(mapNotionPage));
     hasMore = data.has_more || false;
     startCursor = data.next_cursor;
-    // Update row count hint while more pages remain
+    console.log('[stream] page', pageNum, '— rows so far:', allEntries.length, '| has_more:', hasMore);
     if(hasMore){
       document.getElementById('fCount').textContent =
         allEntries.length + ' rows (loading…)';
     }
   }
+  console.log('[stream] complete — total rows:', allEntries.length);
 }
 
 // Maps a single raw Notion page object to a cockpit entry.
@@ -1422,7 +1428,7 @@ function applyFilters(){
     if(pr&&e.project!==pr) return false;
     if(pe&&e.person!==pe) return false;
     return true;
-  });
+  }).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   document.getElementById('fCount').textContent=filtered.length+' rows'+(allEntries.length!==filtered.length?' (filtered)':'')+(allEntries.length&&!document.getElementById('cfgProxy').value?' · demo':'');
   const tbody=document.getElementById('logBody');
   if(!filtered.length){
