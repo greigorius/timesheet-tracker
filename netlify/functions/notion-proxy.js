@@ -418,54 +418,73 @@ function findInIndex(index, searchValue, matchType) {
 // RELATION TITLE RESOLUTION (query mode)
 // ---------------------------------------------------------------------------
 //
-// Strategy: query each related DB once (up to 100 records per page) to build
-// an id→name map, then stamp _title onto every relation entry in the results.
-// This replaces the old approach of one /v1/pages/{id} call per unique relation
-// ID, which could hit 50–100+ calls and blow the 10-second Netlify timeout.
+// Strategy: query each related DB once to build an id→name map, then stamp
+// _title onto every relation entry in the results.
 //
+// The map is cached at module scope (per warm Netlify instance) for 2 minutes.
+// This is critical for the cockpit's streaming page-by-page load: without the
+// cache each proxy call makes ~5 Notion API sub-calls (schema + relation DBs),
+// and back-to-back page fetches quickly hit Notion's 429 rate limit.
+// With the cache, only the first call in a 2-minute window pays the cost;
+// subsequent calls just stamp the cached titles onto the new results.
+//
+const _titleCache = {}; // keyed by sourceDbId
+const TITLE_CACHE_TTL = 120_000; // 2 minutes
+
 async function resolveRelationTitles(pages, token, sourceDbId) {
-  // 1. Find which DB IDs appear as relation targets in this DB's schema.
-  //    We need the schema to map relation prop → database_id.
-  let relDbIds = [];
-  try {
-    const schemaRes = await fetch('https://api.notion.com/v1/databases/' + sourceDbId, {
-      headers: notionHeaders(token),
-    });
-    if (schemaRes.ok) {
-      const schema = await schemaRes.json();
-      const seen = new Set();
-      Object.values(schema.properties || {}).forEach(prop => {
-        const dbId = prop.type === 'relation' && prop.relation && prop.relation.database_id;
-        if (dbId && !seen.has(dbId)) { seen.add(dbId); relDbIds.push(dbId); }
+  const now = Date.now();
+  let titleMap;
+
+  const cached = _titleCache[sourceDbId];
+  if (cached && (now - cached.time) < TITLE_CACHE_TTL) {
+    // Re-use cached map — no Notion calls needed for this invocation
+    titleMap = cached.map;
+  } else {
+    // Build fresh map
+    titleMap = {};
+
+    // 1. Find which DB IDs appear as relation targets in this DB's schema.
+    let relDbIds = [];
+    try {
+      const schemaRes = await fetch('https://api.notion.com/v1/databases/' + sourceDbId, {
+        headers: notionHeaders(token),
       });
+      if (schemaRes.ok) {
+        const schema = await schemaRes.json();
+        const seen = new Set();
+        Object.values(schema.properties || {}).forEach(prop => {
+          const dbId = prop.type === 'relation' && prop.relation && prop.relation.database_id;
+          if (dbId && !seen.has(dbId)) { seen.add(dbId); relDbIds.push(dbId); }
+        });
+      }
+    } catch { /* fall through — titleMap stays empty */ }
+
+    // 2. For each related DB, fetch all pages and build id→name map.
+    for (const dbId of relDbIds) {
+      let cursor;
+      do {
+        try {
+          const payload = { page_size: 100 };
+          if (cursor) payload.start_cursor = cursor;
+          const r = await fetch('https://api.notion.com/v1/databases/' + dbId + '/query', {
+            method: 'POST',
+            headers: notionHeaders(token),
+            body: JSON.stringify(payload),
+          });
+          if (!r.ok) break;
+          const data = await r.json();
+          (data.results || []).forEach(page => {
+            const titleProp = Object.values(page.properties || {}).find(p => p.type === 'title');
+            const name = titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text;
+            if (name) titleMap[page.id] = name;
+          });
+          cursor = data.has_more ? data.next_cursor : null;
+        } catch { break; }
+      } while (cursor);
     }
-  } catch { /* fall through — titleMap stays empty */ }
 
-  if (!relDbIds.length) return;
-
-  // 2. For each related DB, fetch all pages (paginated) and build id→name map.
-  const titleMap = {};
-  for (const dbId of relDbIds) {
-    let cursor;
-    do {
-      try {
-        const payload = { page_size: 100 };
-        if (cursor) payload.start_cursor = cursor;
-        const r = await fetch('https://api.notion.com/v1/databases/' + dbId + '/query', {
-          method: 'POST',
-          headers: notionHeaders(token),
-          body: JSON.stringify(payload),
-        });
-        if (!r.ok) break;
-        const data = await r.json();
-        (data.results || []).forEach(page => {
-          const titleProp = Object.values(page.properties || {}).find(p => p.type === 'title');
-          const name = titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text;
-          if (name) titleMap[page.id] = name;
-        });
-        cursor = data.has_more ? data.next_cursor : null;
-      } catch { break; }
-    } while (cursor);
+    // Store in cache even if empty, so we don't hammer on errors
+    _titleCache[sourceDbId] = { map: titleMap, time: now };
   }
 
   if (!Object.keys(titleMap).length) return;

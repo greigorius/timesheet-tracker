@@ -1052,6 +1052,9 @@ async function streamNotionEntries(onPage, gen){
     if(hasMore){
       document.getElementById('fCount').textContent =
         allEntries.length + ' rows (loading…)';
+      // Brief pause between pages — the proxy caches relation titles after the
+      // first call, but Notion still rate-limits the raw DB queries (429).
+      await new Promise(r => setTimeout(r, 500));
     }
   }
   console.log('[stream] complete — total rows:', allEntries.length);
