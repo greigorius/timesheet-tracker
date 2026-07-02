@@ -25,7 +25,10 @@ The CSV columns are:
   #, Day, Date, Client, Project Reference, Item No., Category, Variation? (Y/N), Description, Hours
 
 Rules:
-- Skip any row where Hours is blank or zero
+- The template has a fixed number of rows (e.g. 30). Most may be empty — skip all empty rows wherever they appear (beginning, middle, or end of the data).
+- Skip any row where Hours is blank, zero, or non-numeric.
+- Skip any row where both Date and Description are blank, regardless of other values.
+- Only process rows that contain actual timesheet entries with at least a Date and Hours value.
 - Dates: output as YYYY-MM-DD
 - Day: output the full day name (Monday, Tuesday, etc.)
 - Variation: output exactly "Y" or "N" (normalise Yes/yes/y → Y, No/no/n → N, blank → N)
