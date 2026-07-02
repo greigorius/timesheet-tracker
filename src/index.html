@@ -56,8 +56,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 .pill-btn:disabled{opacity:.4;cursor:not-allowed}
 
 /* ── IMPORT TRIGGER ── */
-.trigger-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border-bottom:none;position:relative}
-.trigger-col{padding:34px 14px 14px}
+.trigger-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border-bottom:none}
+.trigger-col{padding:34px 14px 14px;position:relative}
 .trigger-col+.trigger-col{border-left:1px solid var(--border)}
 .scan-hub-btn{
   position:absolute;top:0;left:50%;transform:translate(-50%,-50%);
@@ -149,10 +149,19 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 .cv-row{display:flex;align-items:center;gap:0;min-height:28px}
 .cv-label{
   width:210px;flex-shrink:0;
-  font-size:12px;color:var(--text);
+  display:flex;flex-direction:column;align-items:flex-end;justify-content:center;
+  padding-right:14px;text-align:right;
+}
+.cv-label-sub{
+  font-family:var(--mono);font-size:9px;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.05em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;
+  margin-bottom:2px;
+}
+.cv-label-main{
+  font-size:12px;color:var(--text);line-height:1.3;
   overflow:hidden;text-overflow:ellipsis;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
-  padding-right:14px;text-align:right;line-height:1.3;
 }
 /* the full-width stacked bar */
 .cv-track{flex:1;height:26px;display:flex;align-items:center;position:relative}
@@ -371,12 +380,11 @@ td.dim{color:var(--muted)}
     </div>
     <div class="trigger-grid">
 
-      <button class="scan-hub-btn" onclick="scanInbox()" id="scanBtn" title="Scan Inbox">
-        <span class="shb-icon">↻</span><span>Scan<br>Inbox</span>
-      </button>
-
       <!-- COL 1: File list -->
       <div class="trigger-col">
+        <button class="scan-hub-btn" onclick="scanInbox()" id="scanBtn" title="Scan Inbox">
+          <span class="shb-icon">↻</span><span>Scan<br>Inbox</span>
+        </button>
         <div class="tc-label"><span class="step-num" id="step1num">1</span>Select files to import</div>
         <div class="sel-all-row">
           <label class="sel-all-label">
@@ -1312,6 +1320,22 @@ function renderBarChart(entries) {
   });
   const segItems = Object.keys(segTotals).sort((a,b) => segTotals[b]-segTotals[a]);
 
+  // When rows = projects, work out which client each project belongs to
+  // (most frequent client across that project's entries) for the sub-heading
+  const clientForProject = {};
+  if (yKey === 'project') {
+    const tally = {};
+    entries.forEach(e => {
+      if (!e.project || !e.client) return;
+      tally[e.project] = tally[e.project] || {};
+      tally[e.project][e.client] = (tally[e.project][e.client] || 0) + 1;
+    });
+    Object.keys(tally).forEach(p => {
+      const counts = tally[p];
+      clientForProject[p] = Object.keys(counts).sort((a,b) => counts[b]-counts[a])[0];
+    });
+  }
+
   const body = document.getElementById('chartViewBody');
   body.innerHTML = '';
 
@@ -1337,8 +1361,22 @@ function renderBarChart(entries) {
     // ── Label
     const lbl = document.createElement('div');
     lbl.className = 'cv-label';
-    lbl.textContent = yKey === 'person' ? yItem : shortProj(yItem);
     lbl.title = yItem;
+
+    if (yKey === 'project') {
+      const client = clientForProject[yItem];
+      if (client) {
+        const sub = document.createElement('div');
+        sub.className = 'cv-label-sub';
+        sub.textContent = client;
+        lbl.appendChild(sub);
+      }
+    }
+    const main = document.createElement('div');
+    main.className = 'cv-label-main';
+    main.textContent = yKey === 'person' ? yItem : shortProj(yItem);
+    lbl.appendChild(main);
+
     row.appendChild(lbl);
 
     // ── Track (full remaining width)
