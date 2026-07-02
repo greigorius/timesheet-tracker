@@ -1,181 +1,64 @@
-# Timesheet Tracker — Axiom DL
+# DKH Timesheet Cockpit
 
-Cockpit for managing weekly timesheet imports, hours visualisation, and reconciliation.
-Design Technicians submit `.xlsx` files to Dropbox; this tool validates, imports, and displays them via a Make.com pipeline into Notion.
-
-## Stack
-
-- **Frontend** — Plain HTML/CSS/JS in `src/index.html` (no framework)
-- **Build** — [Vite](https://vitejs.dev/) (dev server + production build)
-- **Deploy** — [Netlify](https://netlify.com) (auto-deploy from GitHub)
-- **Automation** — [Make.com](https://make.com) (two scenarios: Scan + Import)
-- **Database** — [Notion](https://notion.so) (Timesheets DB — already exists)
-- **File storage** — Dropbox `/Timesheets/Inbox/` (DTs drop files here)
+A web-based operations tool for **Design Know How (DKH)** to manage weekly timesheet submissions. Team members drop `.xlsx` files into a shared Dropbox folder; this cockpit validates, imports, and visualises them through a Make.com automation pipeline into Notion.
 
 ---
 
-## Quick Start
+## Purpose
 
-### Prerequisites
-- [Node.js](https://nodejs.org/) v20+
-- A GitHub account with repo `greigorius/timesheet-tracker` created
-
-### First run
-Double-click **`start.bat`** — installs dependencies and opens `http://localhost:5173`.
-
-### Subsequent runs
-Double-click **`start.bat`** — skips install, goes straight to dev server.
+- Provide a single interface to scan, import, and review timesheet submissions
+- Parse freeform Excel data using AI (Claude Haiku) into structured Notion records
+- Validate all relation fields (Person, Client, Item) against live Notion databases before writing
+- Stream the full timesheet log from Notion in real time, newest entries first
 
 ---
 
-## GitHub Setup (one time)
+## Architecture Overview
 
-```bash
-cd C:\Users\greig\Documents\ClaudeProjects\timesheet-tracker
-
-git init
-git remote add origin https://github.com/greigorius/timesheet-tracker.git
-git branch -M main
-git add .
-git commit -m "Initial commit"
-git push -u origin main
+```
+[Team Member]
+     │  drops ADL_Timesheet_Template.xlsx
+     ▼
+[Dropbox]  /DESIGN KNOW HOW/Timesheets/Inbox/
+     │
+     │  Make Scenario B (Scan Inbox)
+     ◄──────────────────────────────── [Cockpit "Scan" button]
+     │  returns file list + already-imported flags
+     ▼
+[Cockpit "Import" button]
+     │  POST → Make Scenario A webhook
+     ▼
+[Make.com — Scenario A: Full Import]
+     │
+     ├─ 1. Dropbox: get file bytes
+     ├─ 2. parse-xlsx (Netlify fn)  → CSV rows
+     ├─ 3. claude-parse (Netlify fn) → structured JSON rows (AI normalisation)
+     ├─ 4. notion-proxy validate-relations (Netlify fn)
+     │       → resolves Person / Client / Item page IDs
+     │       → Person missing = hard fail (file rejected, 422)
+     │       → Client / Item missing = soft warn (blank + "Flagged")
+     ├─ 5. Notion: create one page per valid row in Timesheets DB
+     ├─ 6. Dropbox: move file Inbox → Processed
+     └─ 7. Webhook respond: 200 OK or 422 with error detail
+          │
+          ▼
+     [Cockpit refreshes file list + streams new Notion rows]
 ```
 
-After pushing, connect to Netlify (see Deploy section below).
-
-### Pushing updates
-Double-click **`push-to-github.bat`**, enter a commit message. Netlify auto-deploys within ~90 seconds.
-
 ---
 
-## Environment Variables
+## Tech Stack
 
-All runtime config is stored in browser `localStorage` (entered via the Settings drawer in the UI). There are no server-side secrets in this repo.
-
-For local reference, copy `.env.example` to `.env` and fill in your values. The `.env` file is git-ignored and is **not used by the app** — it's a local cheat-sheet only.
-
-```bash
-cp .env.example .env
-# then edit .env with your actual values
-```
-
-| Variable | What it is |
+| Layer | Technology |
 |---|---|
-| `MAKE_SCAN_WEBHOOK` | Make webhook URL — returns Dropbox file list |
-| `MAKE_WRITE_WEBHOOK` | Make webhook URL — triggers full import pipeline |
-| `NOTION_TOKEN` | Notion internal integration token (read-only) |
-| `NOTION_TIMESHEETS_DB` | Timesheets DB ID (default set in app) |
-| `PROXY_URL` | Notion proxy endpoint on Axiom Hub backend |
-
-To connect the app: open it → click **⚙** (Settings) → paste in the values above → Save & Connect.
-
----
-
-## Deploy to Netlify
-
-### One-time setup
-1. Go to [netlify.com](https://netlify.com) → **Add new site → Import from Git**
-2. Authorise GitHub and select `timesheet-tracker`
-3. Build settings are auto-detected from `netlify.toml`:
-   - Build command: `npm run build`
-   - Publish directory: `dist`
-4. Click **Deploy** — live at your Netlify URL in ~90 seconds
-
-> `dist/` is git-ignored. Netlify runs the build on its own servers on every deploy — never commit `dist/`.
-
----
-
-## Connections Required
-
-### 1. Make.com — Scan Webhook (Scenario B)
-
-Triggered by "Scan Inbox" button. Must respond synchronously with:
-
-```json
-[
-  {
-    "name": "GF_2026-W24.xlsx",
-    "size": "18 KB",
-    "modified": "Today 08:12",
-    "headers": ["Name","Project","Category","Description","Date","Day","Item No","Hours"]
-  }
-]
-```
-
-Set the URL under **Settings → Make.com Scan Inbox Webhook**.
-
-### 2. Make.com — Write Webhook (Scenario A)
-
-Triggered by "Write to Notion" button. Receives:
-
-```json
-{
-  "files": ["GF_2026-W24.xlsx", "GO_2026-W24.xlsx"],
-  "triggered_at": "2026-06-11T09:15:00.000Z"
-}
-```
-
-Set the URL under **Settings → Make.com Write to Notion Webhook**.
-
-### 3. Notion Integration Token
-
-Create an internal integration at [notion.so/my-integrations](https://www.notion.so/my-integrations). Grant it read access to the Timesheets database. Paste the token (`ntn_...`) under **Settings → Notion Integration Token**.
-
-Timesheets DB ID (pre-filled): `197210e4-582e-8087-81be-000b8525577a`
-
-### 4. Notion API Proxy
-
-Direct Notion API calls are blocked by CORS in the browser. A proxy endpoint on the Axiom Hub Express backend forwards reads:
-
-```js
-// server/routes/notion-proxy.js  (add to greigorius/dm-tracker)
-app.post('/api/notion/query', async (req, res) => {
-  const { notionToken, databaseId, filter, sorts, page_size } = req.body
-  const response = await fetch(
-    `https://api.notion.com/v1/databases/${databaseId}/query`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${notionToken}`,
-        'Notion-Version': '2022-06-28',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ filter, sorts, page_size }),
-    }
-  )
-  res.json(await response.json())
-})
-```
-
-Set the deployed URL under **Settings → API Proxy URL** (e.g. `https://axiom-hub.netlify.app/api/notion/query`).
-
----
-
-## Notion Database Reference
-
-| Database | ID |
-|---|---|
-| **Timesheets** | `197210e4-582e-8087-81be-000b8525577a` |
-| Projects | `5c689434-c2b0-4766-9831-d2b31ef0f8de` |
-| Tasks | `bb783a35-a407-4637-89c6-78ebc76c8699` |
-
-**Timesheets DB property mapping:**
-
-| Notion property | Type | Cockpit field |
-|---|---|---|
-| Person | rich_text | `entry.person` |
-| Project | relation title | `entry.project` |
-| Category | select | `entry.category` |
-| Description | rich_text | `entry.description` |
-| Date | date (start) | `entry.date` |
-| Day | select | `entry.day` |
-| Hours | number | `entry.hours` |
-| Import Status | select | `entry.status` |
-| Source File | rich_text | `entry.sourceFile` |
-
-**Category select options** (must exist in Notion): `Design`, `Drafting`, `Coordination`, `Meetings`, `Admin`, `Site`, `Other`
-
-**Import Status options**: `Imported`, `Flagged`, `Duplicate`, `Manual`
+| Frontend | Plain HTML / CSS / JS — `src/index.html` (no framework) |
+| Build | [Vite](https://vitejs.dev/) |
+| Deploy | [Netlify](https://netlify.com) — auto-deploy from GitHub |
+| Serverless functions | Netlify Functions (`netlify/functions/`) |
+| Automation | [Make.com](https://make.com) (two scenarios) |
+| Database | [Notion](https://notion.so) |
+| File storage | Dropbox — `/DESIGN KNOW HOW/Timesheets/` |
+| AI parsing | Anthropic Claude Haiku (`claude-haiku-4-5-20251001`) |
 
 ---
 
@@ -184,29 +67,243 @@ Set the deployed URL under **Settings → API Proxy URL** (e.g. `https://axiom-h
 ```
 timesheet-tracker/
 ├── src/
-│   └── index.html              ← The cockpit (all HTML/CSS/JS, ~1200 lines)
-├── docs/
-│   ├── make-scenario-scan.json     ← Make Scenario B blueprint (Scan Inbox)
-│   ├── make-scenario-import.json   ← Make Scenario A blueprint (Full Import)
-│   └── claude-normalise-prompt.md  ← Claude prompt used in Make import pipeline
-├── dist/                       ← Built output (git-ignored)
+│   └── index.html                  ← Cockpit (all HTML/CSS/JS, single file)
+├── netlify/
+│   └── functions/
+│       ├── notion-proxy.js         ← Notion API proxy + validate-relations
+│       ├── claude-parse.js         ← Claude Haiku AI normaliser
+│       └── parse-xlsx.js           ← XLSX → CSV extractor
+├── ADL_Timesheet_Template.xlsx     ← Team timesheet template
+├── netlify.toml                    ← Build config + function routing
 ├── vite.config.js
-├── netlify.toml
 ├── package.json
-├── .gitignore
-├── .env.example                ← Copy to .env for local reference
-├── start.bat                   ← Dev server launcher
-└── push-to-github.bat          ← Git commit + push
+├── .env.example                    ← Credential reference (copy to .env locally)
+├── start.bat                       ← Dev server launcher (Windows)
+└── push-to-github.bat              ← Git commit + push (Windows)
 ```
 
 ---
 
-## Roadmap
+## Netlify Functions
 
-- [x] Cockpit UI — complete
-- [x] Demo data — complete
-- [x] Make scenario blueprints — complete
-- [ ] Make scenarios deployed and webhook URLs configured
-- [ ] Notion proxy endpoint added to Axiom Hub
-- [ ] Invoice reconciliation view
-- [ ] CSV export of filtered import log
+### `notion-proxy.js`
+
+CORS proxy for Notion API — required because browser→Notion direct calls are blocked by CORS.
+
+**Query mode** (cockpit data load):
+```json
+POST /.netlify/functions/notion-proxy
+{ "db": "timesheets", "sorts": [{"property": "Date", "direction": "descending"}], "page_size": 100 }
+```
+Returns a standard Notion database query response. Resolves relation `_title` fields by querying each related DB once and caching the result for 2 minutes (prevents 429 rate-limit errors during paginated streaming).
+
+**Validate-relations mode** (called by Make before writing to Notion):
+```json
+POST /.netlify/functions/notion-proxy
+{ "action": "validate-relations", "rows": [ { "person": "James Christmas", "client": "TMJ", "item_no": "081", ... } ] }
+```
+- Fetches timesheets DB schema to discover relation DB IDs (People, Clients, Items)
+- Builds name→ID lookup indexes for all three DBs
+- Applies fuzzy matching cascade: exact → starts-with → contains → search-contains-key
+- Item matching is anchored to the **code prefix** (everything before ` - ` in the item name) to prevent false matches against descriptive suffixes (e.g. `111` must NOT match `081 - CLG-111 Ceiling`)
+- Duplicate item numbers across projects are disambiguated using the row's `project` field
+- Returns `valid_rows_json` (resolved rows ready for Notion) and `error_rows` (hard failures)
+
+**Validation rules:**
+
+| Field | On missing/unresolved |
+|---|---|
+| Person | Hard fail — entire file rejected (422) |
+| Client | Soft warn — blank relation, Import Status = `Flagged` |
+| Item | Soft warn — blank relation, Import Status = `Flagged` |
+| Project | Informational only — populated by Notion rollup from Item |
+
+### `claude-parse.js`
+
+Calls the Anthropic Claude Haiku API to normalise raw CSV timesheet data into structured JSON rows.
+
+- Input: raw CSV from `parse-xlsx`, person name, week commencing date, filename
+- Output: `{ rows: [...], rows_json: "...", count: N }`
+- Each row: `{ date, day, client, project, item_no, category, variation, description, hours, person, week_commencing }`
+- Skips empty rows (no Date + Hours), normalises Variation to `"Y"`/`"N"`, passes Client/Project/Item abbreviations through unchanged for downstream fuzzy matching
+
+### `parse-xlsx.js`
+
+Parses an XLSX binary (base64-encoded) into a CSV string.
+
+- Input: base64 XLSX content + filename (from Make via POST)
+- Output: `{ csv_escaped, person, week_commencing, filename }`
+- Extracts person name and week from the filename convention `YYYY-WNN_FirstnameLastname.xlsx`
+
+---
+
+## Make.com Scenarios
+
+### Scenario A — Full Import (ID: 6144563)
+
+**Trigger:** Webhook POST from cockpit
+**Flow:**
+1. Iterator over file array from webhook payload
+2. Dedup check — queries Notion for existing rows with matching `Source File`; skips if already imported
+3. Dropbox: get file from `/DESIGN KNOW HOW/Timesheets/Inbox/`
+4. HTTP: POST to `parse-xlsx` Netlify function
+5. HTTP: POST to `claude-parse` Netlify function (60s timeout)
+6. HTTP: POST to `notion-proxy` validate-relations (60s timeout)
+7. Router — if `error_count > 0`: respond 422; else continue
+8. JSON Parse: iterate `valid_rows_json` using data structure **ADL Valid Row** (ID: 455340)
+9. Notion: Create a Page in Timesheets DB for each row
+10. Aggregator: collects all created pages (breaks iterator scope so steps 11–12 run once)
+11. Dropbox: move file to `/DESIGN KNOW HOW/Timesheets/Processed/`
+12. Webhook: respond 200 OK
+
+**Key Make settings:**
+- Sequential processing: OFF (prevents webhook responder timeout)
+- `Variation? (Y/N)` field: `{{20.variation}}` — claude-parse guarantees `Y`/`N`
+- `Import Status` field: `{{if(20.import_status; 20.import_status; "Imported")}}` — defaults to Imported for clean rows
+- `Item` relation: `{{if(20.item_id; split(20.item_id; ","); ignore)}}` — `ignore` avoids `parseJSON` error when item_id is null
+
+### Scenario B — Scan Inbox
+
+**Trigger:** Webhook GET from cockpit "Scan Inbox" button
+**Flow:** Lists files in Dropbox `/DESIGN KNOW HOW/Timesheets/Inbox/` and returns metadata array to cockpit
+
+---
+
+## Notion Database Reference
+
+| Database | ID | Purpose |
+|---|---|---|
+| **Timesheets** | `197210e4-582e-8074-af63-f01e789e2d1c` | One row per timesheet entry |
+| **Projects** | `5c689434-c2b0-4766-9831-d2b31ef0f8de` | Project reference (rollup source) |
+| People | discovered via schema | Person relation target |
+| Clients | discovered via schema | Client relation target |
+| Items | discovered via schema | Item relation target |
+
+**Timesheets DB properties used by import:**
+
+| Property | Notion Type | Notes |
+|---|---|---|
+| Short Description of Work Done | title | Entry description |
+| Person | relation → People DB | Hard fail if not resolved |
+| Client | relation → Clients DB | Soft warn if not resolved |
+| Item | relation → Items DB | Soft warn if not resolved; code-prefix matching |
+| Category | select | Design / Drafting / Coordination / Meetings / Admin / Site / Other |
+| Date | date | YYYY-MM-DD |
+| Actual Hours Spent | number | |
+| Variation? (Y/N) | select | Y or N |
+| Source File | rich_text | Filename — used for dedup check |
+| Import Status | select | `Imported` / `Flagged` |
+| Projects | formula/rollup | Populated automatically from Item relation |
+
+---
+
+## Cockpit Features
+
+**Import Pipeline panel**
+- Scans Dropbox Inbox on demand
+- Marks files already in Notion with an "Imported" badge
+- Triggers single-file or batch import via Make Scenario A webhook
+- Shows per-file import status and error details inline
+
+**Import Log**
+- Streams Notion Timesheets DB pages in real time, newest-first (100 rows per page)
+- Explicit client-side date sort as safety net
+- Filter by Status / Project / Person
+- Colour-coded person dots and project dots
+
+**Hours Breakdown**
+- Stacked bar chart — group by Person or Project, segment by the other
+- Filter contracted vs variation hours
+- Expandable tree: Client → Project → Item → hours
+
+---
+
+## Environment Variables
+
+Set these in **Netlify → Site → Environment Variables**. Never commit actual values.
+
+| Variable | Required | Description |
+|---|---|---|
+| `NOTION_TOKEN` | ✅ | Notion internal integration token (`ntn_...`). Must have access to Timesheets, Projects, People, Clients, and Items databases. |
+| `NOTION_TIMESHEETS_DB` | ✅ | Timesheets database ID (without hyphens) |
+| `NOTION_PROJECTS_DB` | ✅ | Projects database ID (without hyphens) |
+| `ANTHROPIC_API_KEY` | ✅ | Anthropic API key (`sk-ant-...`) — used by `claude-parse.js` |
+
+**Cockpit settings** (stored in browser `localStorage` via the ⚙ Settings drawer):
+
+| Setting | Description |
+|---|---|
+| Proxy URL | `https://dkh-timesheet-tracker.netlify.app/.netlify/functions/notion-proxy` |
+| Scan Inbox Webhook | Make Scenario B webhook URL |
+| Write to Notion Webhook | Make Scenario A webhook URL |
+
+---
+
+## Local Development
+
+**Prerequisites:** Node.js v20+
+
+```bash
+# Install dependencies
+npm install
+
+# Start dev server (http://localhost:5173)
+npm run dev
+
+# Or double-click start.bat on Windows
+```
+
+The dev server proxies nothing — to test against live Notion data, enter the production proxy URL in the cockpit Settings drawer.
+
+**Deploy:**
+```bash
+# Windows — double-click push-to-github.bat
+# Or manually:
+git add .
+git commit -m "your message"
+git push
+# Netlify auto-deploys within ~90 seconds
+```
+
+> ⚠️ All git operations must be run from Windows (Git Bash or PowerShell), not the Linux sandbox — NTFS lock files cause errors in WSL/Linux.
+
+---
+
+## Fuzzy Matching Reference
+
+The `notion-proxy` validate-relations logic uses a 4-pass cascade for each relation field:
+
+| Pass | Logic | Example |
+|---|---|---|
+| 1 — Exact | Case-insensitive exact match | `"TMJ Interiors"` → `"TMJ Interiors"` |
+| 2 — Starts-with | Key starts with search term | `"24-354"` → `"24-354 - EIT Auditorium"` |
+| 3 — Contains | Key contains search term | `"EIT Auditorium"` → `"24-354 - EIT Auditorium"` |
+| 4 — Fuzzy | Search contains key (min 3 chars) | `"TMJ"` → `"TMJ Interiors"` |
+
+**For Items** — matching is anchored to the **code prefix** (text before the first ` - ` separator):
+
+| Item name | Code prefix | `"111"` matches? | `"081"` matches? |
+|---|---|---|---|
+| `081 - CLG-111 Ceiling` | `081` | ✗ | ✓ |
+| `SK-003` | `SK-003` | ✗ | ✗ |
+| `003` | `003` | ✗ | ✗ |
+
+When the same item number exists on multiple projects (e.g. `001` on Project A and Project B), the row's `project` field is used to disambiguate.
+
+---
+
+## Rate Limiting Notes
+
+Notion API rate limit: ~3 requests/second.
+
+The cockpit streams data in pages of 100 rows with a 500ms pause between pages. The `resolveRelationTitles` function caches its DB title map for 2 minutes per warm Netlify instance, so only the first page in a session pays the full lookup cost (~4–5 Notion sub-calls); subsequent pages cost 1 call each.
+
+If the Notion status page ([notion-status.com](https://www.notion-status.com)) shows an active incident, the cockpit will fall back to demo data automatically.
+
+---
+
+## Data Structure — ADL Valid Row (Make ID: 455340)
+
+Used by the JSON Parse module (Module 20) in Scenario A. Fields:
+
+`date`, `day`, `client`, `project`, `item_no`, `category`, `variation`, `description`, `hours`, `person`, `week_commencing`, `person_id`, `client_id`, `item_id`, `import_status`
