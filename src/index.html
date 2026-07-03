@@ -57,20 +57,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 
 /* ── IMPORT TRIGGER ── */
 .trigger-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border-bottom:none}
-.trigger-col{padding:34px 14px 14px;position:relative}
+.trigger-col{padding:14px}
 .trigger-col+.trigger-col{border-left:1px solid var(--border)}
-.scan-hub-btn{
-  position:absolute;top:0;left:50%;transform:translate(-50%,-50%);
-  z-index:3;width:56px;height:56px;border-radius:50%;
-  background:var(--surface);border:1px solid var(--blue);color:var(--blue-bright);
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
-  cursor:pointer;font-family:var(--mono);font-size:8px;text-transform:uppercase;letter-spacing:.04em;
-  line-height:1.15;transition:all .15s;
-  box-shadow:0 0 0 4px var(--surface),0 2px 6px rgba(0,0,0,.35);
-}
-.scan-hub-btn:hover:not(:disabled){background:var(--blue-dim);border-color:var(--blue-bright)}
-.scan-hub-btn:disabled{opacity:.5;cursor:not-allowed}
-.scan-hub-btn .shb-icon{font-size:15px;line-height:1;margin-bottom:1px}
 .tc-label{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;display:flex;align-items:center;gap:8px}
 .step-num{width:18px;height:18px;border-radius:50%;background:var(--blue-dim);border:1px solid var(--blue);color:var(--blue);font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
 .step-num.done{background:var(--green-dim);border-color:var(--green);color:var(--green)}
@@ -96,10 +84,20 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 .compat-detail .missing{color:var(--amber);font-family:var(--mono);font-size:10px}
 
 /* select-all row */
-.sel-all-row{display:flex;align-items:center;justify-content:space-between;padding:5px 10px;border-radius:3px}
+.sel-all-row{display:flex;align-items:center;justify-content:space-between;padding:5px 10px;border-radius:3px;gap:10px}
 .sel-all-label{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px;cursor:pointer}
 .sel-all-label input{accent-color:var(--blue);cursor:pointer}
-.sel-count{font-family:var(--mono);font-size:10px;color:var(--dim)}
+.sel-all-right{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.sel-count{font-family:var(--mono);font-size:10px;color:var(--dim);white-space:nowrap}
+.scan-inline-btn{
+  display:flex;align-items:center;gap:5px;flex-shrink:0;
+  font-family:var(--mono);font-size:10px;color:var(--blue-bright);
+  background:var(--blue-dim);border:1px solid var(--blue);border-radius:3px;
+  padding:4px 10px;cursor:pointer;white-space:nowrap;transition:all .15s;
+}
+.scan-inline-btn:hover:not(:disabled){background:var(--blue);color:#fff}
+.scan-inline-btn:disabled{opacity:.5;cursor:not-allowed}
+.scan-inline-btn .shb-icon{font-size:12px;line-height:1}
 
 /* write col */
 .selected-summary{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
@@ -382,16 +380,18 @@ td.dim{color:var(--muted)}
 
       <!-- COL 1: File list -->
       <div class="trigger-col">
-        <button class="scan-hub-btn" onclick="scanInbox()" id="scanBtn" title="Scan Inbox">
-          <span class="shb-icon">↻</span><span>Scan<br>Inbox</span>
-        </button>
         <div class="tc-label"><span class="step-num" id="step1num">1</span>Select files to import</div>
         <div class="sel-all-row">
           <label class="sel-all-label">
             <input type="checkbox" id="selAll" onchange="toggleSelectAll(this.checked)">
             Select all compatible
           </label>
-          <span class="sel-count" id="selCount">0 of 0 selected</span>
+          <div class="sel-all-right">
+            <span class="sel-count" id="selCount">0 of 0 selected</span>
+            <button class="scan-inline-btn" onclick="scanInbox()" id="scanBtn" title="Scan Inbox">
+              <span class="shb-icon">↻</span>Scan Inbox
+            </button>
+          </div>
         </div>
         <div class="file-list" id="fileList">
           <div class="empty" style="padding:16px">Click "Scan Inbox" to check the Dropbox inbox for files.</div>
@@ -769,7 +769,7 @@ async function scanInbox(){
 
   if(!cfg.scanUrl){
     list.innerHTML='<div class="empty" style="padding:16px;color:var(--muted)">No scan webhook configured — add it in ⚙ Settings.</div>';
-    btn.disabled=false;btn.innerHTML='<span class="shb-icon">↻</span><span>Scan<br>Inbox</span>';
+    btn.disabled=false;btn.innerHTML='<span class="shb-icon">↻</span>Scan Inbox';
     return;
   }
 
@@ -786,7 +786,7 @@ async function scanInbox(){
     list.innerHTML='<div class="empty" style="padding:16px;color:var(--red)">Scan error: '+esc(e.message)+'</div>';
   }
 
-  btn.disabled=false;btn.innerHTML='<span class="shb-icon">↻</span><span>Scan<br>Inbox</span>';
+  btn.disabled=false;btn.innerHTML='<span class="shb-icon">↻</span>Scan Inbox';
 }
 
 async function fetchImportedFiles(){
