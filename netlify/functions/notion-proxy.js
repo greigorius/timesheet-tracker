@@ -43,6 +43,10 @@ exports.handler = async (event) => {
     return handleValidateRelations(body, token);
   }
 
+  if (body.action === 'reference-data') {
+    return handleReferenceData(token);
+  }
+
   // Default: database query
   const { db = 'timesheets', ...queryPayload } = body;
   const DB_MAP = {
@@ -204,11 +208,14 @@ async function handleValidateRelations(body, token) {
     }
   }
 
+  const flaggedCount = validRows.filter(r => r.import_status === 'Flagged').length;
+
   return respond(200, {
     valid_rows:      validRows,
     error_rows:      errorRows,
     valid_count:     validRows.length,
     error_count:     errorRows.length,
+    flagged_count:   flaggedCount,
     valid_rows_json: JSON.stringify(validRows),
     _debug: {
       person_index_size:  Object.keys(personIdx).length,
@@ -253,6 +260,93 @@ async function buildNameIndex(dbId, token) {
  * duplicate item numbers (e.g. "001" on multiple projects) can be disambiguated
  * by cross-referencing the item's project relation IDs against the project index.
  */
+// ---------------------------------------------------------------------------
+// REFERENCE DATA (standalone reference page)
+// ---------------------------------------------------------------------------
+// Returns all Clients, Projects, and Items for the team reference page.
+// Clients and Items DB IDs are discovered via the timesheets schema.
+// Projects DB ID comes from the NOTION_PROJECTS_DB env var.
+
+async function handleReferenceData(token) {
+  const timesheetsDbId = process.env.NOTION_TIMESHEETS_DB;
+  const projectsDbId   = process.env.NOTION_PROJECTS_DB;
+  if (!timesheetsDbId) return respond(500, { error: 'NOTION_TIMESHEETS_DB not configured' });
+
+  // Discover client and item DB IDs from timesheets schema
+  let clientDbId, itemDbId;
+  try {
+    const schemaRes = await fetch('https://api.notion.com/v1/databases/' + timesheetsDbId, {
+      headers: notionHeaders(token),
+    });
+    if (!schemaRes.ok) return respond(502, { error: 'Failed to fetch timesheets schema' });
+    const schema = await schemaRes.json();
+    const p = schema.properties || {};
+    clientDbId = p.Client && p.Client.relation && p.Client.relation.database_id;
+    itemDbId   = p.Item   && p.Item.relation   && p.Item.relation.database_id;
+  } catch (err) {
+    return respond(502, { error: 'Schema fetch failed', detail: err.message });
+  }
+
+  // Build project name→id map for item cross-reference
+  let projectNameMap = {};
+  if (projectsDbId) {
+    try { projectNameMap = await buildNameIndex(projectsDbId, token); } catch { /* ignore */ }
+  }
+  // Invert to id→name
+  const projectIdToName = Object.fromEntries(Object.entries(projectNameMap).map(([k, v]) => [v, k]));
+
+  // Fetch all three lists in parallel
+  const [clients, projects, rawItems] = await Promise.all([
+    clientDbId  ? fetchAllPages(clientDbId,  token) : Promise.resolve([]),
+    projectsDbId? fetchAllPages(projectsDbId, token) : Promise.resolve([]),
+    itemDbId    ? fetchAllPages(itemDbId,     token) : Promise.resolve([]),
+  ]);
+
+  function extractTitle(page) {
+    const titleProp = Object.values(page.properties || {}).find(p => p.type === 'title');
+    return titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text || '';
+  }
+
+  function itemCodePrefix(name) {
+    const sep = name.indexOf(' - ');
+    return (sep === -1 ? name : name.slice(0, sep)).trim();
+  }
+
+  const clientList  = clients.map(p => ({ name: extractTitle(p) })).filter(c => c.name).sort((a,b) => a.name.localeCompare(b.name));
+  const projectList = projects.map(p => ({ name: extractTitle(p) })).filter(p => p.name).sort((a,b) => a.name.localeCompare(b.name));
+  const itemList    = rawItems.map(p => {
+    const name = extractTitle(p);
+    if (!name) return null;
+    // Find linked project name via relation
+    let project = '';
+    Object.values(p.properties || {}).forEach(prop => {
+      if (prop.type === 'relation' && prop.relation && prop.relation[0]) {
+        project = projectIdToName[prop.relation[0].id] || '';
+      }
+    });
+    return { name, code: itemCodePrefix(name), project };
+  }).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+
+  return respond(200, { clients: clientList, projects: projectList, items: itemList });
+}
+
+async function fetchAllPages(dbId, token) {
+  const results = [];
+  let cursor;
+  do {
+    const payload = { page_size: 100 };
+    if (cursor) payload.start_cursor = cursor;
+    const res = await fetch('https://api.notion.com/v1/databases/' + dbId + '/query', {
+      method: 'POST', headers: notionHeaders(token), body: JSON.stringify(payload),
+    });
+    if (!res.ok) break;
+    const data = await res.json();
+    results.push(...(data.results || []));
+    cursor = data.has_more ? data.next_cursor : null;
+  } while (cursor);
+  return results;
+}
+
 async function buildItemIndexWithProjects(dbId, token) {
   const items = [];
   let cursor;

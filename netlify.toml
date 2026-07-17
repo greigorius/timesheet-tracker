@@ -6,6 +6,12 @@
 [build.environment]
   NODE_VERSION = "20"
 
+# Reference page — serve its own HTML (must come BEFORE SPA fallback)
+[[redirects]]
+  from   = "/reference"
+  to     = "/reference.html"
+  status = 200
+
 # SPA fallback — serve index.html for any unmatched route
 # (must come AFTER functions so /.netlify/functions/* is not caught)
 [[redirects]]
