@@ -67,7 +67,8 @@ A web-based operations tool for **Design Know How (DKH)** to manage weekly times
 ```
 timesheet-tracker/
 ├── src/
-│   └── index.html                  ← Cockpit (all HTML/CSS/JS, single file)
+│   ├── index.html                  ← Cockpit (all HTML/CSS/JS, single file)
+│   └── reference.html              ← Standalone reference page at /reference
 ├── netlify/
 │   └── functions/
 │       ├── notion-proxy.js         ← Notion API proxy + validate-relations
@@ -107,7 +108,7 @@ POST /.netlify/functions/notion-proxy
 - Applies fuzzy matching cascade: exact → starts-with → contains → search-contains-key
 - Item matching is anchored to the **code prefix** (everything before ` - ` in the item name) to prevent false matches against descriptive suffixes (e.g. `111` must NOT match `081 - CLG-111 Ceiling`)
 - Duplicate item numbers across projects are disambiguated using the row's `project` field
-- Returns `valid_rows_json` (resolved rows ready for Notion) and `error_rows` (hard failures)
+- Returns `valid_rows_json` (resolved rows ready for Notion), `error_rows` (hard failures), and `flagged_count` (rows written with blank Client/Item)
 
 **Validation rules:**
 
@@ -117,6 +118,13 @@ POST /.netlify/functions/notion-proxy
 | Client | Soft warn — blank relation, Import Status = `Flagged` |
 | Item | Soft warn — blank relation, Import Status = `Flagged` |
 | Project | Informational only — populated by Notion rollup from Item |
+
+**Reference-data mode** (called by `reference.html`):
+```json
+POST /.netlify/functions/notion-proxy
+{ "action": "reference-data" }
+```
+Returns `{ clients, projects, items }` where each project carries its `client` name (resolved via relation) and each item carries both `project` and `client`. Used to power the standalone reference page.
 
 ### `claude-parse.js`
 
@@ -141,7 +149,7 @@ Parses an XLSX binary (base64-encoded) into a CSV string.
 
 ### Scenario A — Full Import (ID: 6144563)
 
-**Trigger:** Webhook POST from cockpit
+**Trigger:** Webhook POST from cockpit (one file at a time — cockpit sends files sequentially)
 **Flow:**
 1. Iterator over file array from webhook payload
 2. Dedup check — queries Notion for existing rows with matching `Source File`; skips if already imported
@@ -153,14 +161,16 @@ Parses an XLSX binary (base64-encoded) into a CSV string.
 8. JSON Parse: iterate `valid_rows_json` using data structure **ADL Valid Row** (ID: 455340)
 9. Notion: Create a Page in Timesheets DB for each row
 10. Aggregator: collects all created pages (breaks iterator scope so steps 11–12 run once)
-11. Dropbox: move file to `/DESIGN KNOW HOW/Timesheets/Processed/`
-12. Webhook: respond 200 OK
+11. **Filter** — `flagged_count = 0`: only move file if no rows were flagged
+12. Dropbox: move file to `/DESIGN KNOW HOW/Timesheets/Processed/` (skipped if any rows flagged)
+13. Webhook: respond 200 OK with `{ status, file, flagged_count }`
 
 **Key Make settings:**
 - Sequential processing: OFF (prevents webhook responder timeout)
 - `Variation? (Y/N)` field: `{{20.variation}}` — claude-parse guarantees `Y`/`N`
 - `Import Status` field: `{{if(20.import_status; 20.import_status; "Imported")}}` — defaults to Imported for clean rows
 - `Item` relation: `{{if(20.item_id; split(20.item_id; ","); ignore)}}` — `ignore` avoids `parseJSON` error when item_id is null
+- Module 11 filter: `{{17.data.flagged_count}} = 0` — files with flagged rows remain in Inbox so the user can correct them in Notion and re-import
 
 ### Scenario B — Scan Inbox
 
@@ -200,10 +210,13 @@ Parses an XLSX binary (base64-encoded) into a CSV string.
 ## Cockpit Features
 
 **Import Pipeline panel**
-- Scans Dropbox Inbox on demand
-- Marks files already in Notion with an "Imported" badge
-- Triggers single-file or batch import via Make Scenario A webhook
-- Shows per-file import status and error details inline
+
+Two-column queue-based workflow:
+
+- **Column 1 — Available files:** Scans Dropbox Inbox on demand; click any row (or `+ Queue` button) to add it to the import queue. "Add all" queues every file in one click.
+- **Column 2 — Import queue:** Persistent queue showing each file with a live status badge — `Queued` → `Processing…` → `Imported` / `Flagged` / `Error`. Files are imported sequentially (one at a time) via a `▶ Start Import` button. A `Clear` button removes all non-in-progress items.
+- **Flagged behaviour:** If a file's rows contain unresolved Client or Item relations, those rows are written to Notion with `Import Status = Flagged` and the file remains in Dropbox Inbox (not moved to Processed). The queue shows `⚠ Flagged — in Inbox` so the user knows to correct the Notion data and re-import.
+- **Error behaviour:** If a file's Person cannot be resolved, the import is blocked (422) and the queue shows `✗ Error` with the validation message.
 
 **Import Log**
 - Streams Notion Timesheets DB pages in real time, newest-first (100 rows per page)
@@ -215,6 +228,10 @@ Parses an XLSX binary (base64-encoded) into a CSV string.
 - Stacked bar chart — group by Person or Project, segment by the other
 - Filter contracted vs variation hours
 - Expandable tree: Client → Project → Item → hours
+
+**Reference page** (`/reference`)
+
+Standalone page isolated from the cockpit — no navigation link back. Designed for team members filling out timesheets so they can copy-paste exact names. Shows Clients, Projects, and Items in three columns, all grouped by client. Projects show under their client header; Items show under their client header with a project sub-header. A global search bar filters all three columns simultaneously. Clicking any row copies the name to the clipboard.
 
 ---
 

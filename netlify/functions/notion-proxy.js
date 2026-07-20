@@ -272,7 +272,7 @@ async function handleReferenceData(token) {
   const projectsDbId   = process.env.NOTION_PROJECTS_DB;
   if (!timesheetsDbId) return respond(500, { error: 'NOTION_TIMESHEETS_DB not configured' });
 
-  // Discover client and item DB IDs from timesheets schema
+  // Discover client and item DB IDs from the timesheets schema
   let clientDbId, itemDbId;
   try {
     const schemaRes = await fetch('https://api.notion.com/v1/databases/' + timesheetsDbId, {
@@ -287,24 +287,16 @@ async function handleReferenceData(token) {
     return respond(502, { error: 'Schema fetch failed', detail: err.message });
   }
 
-  // Build project name→id map for item cross-reference
-  let projectNameMap = {};
-  if (projectsDbId) {
-    try { projectNameMap = await buildNameIndex(projectsDbId, token); } catch { /* ignore */ }
-  }
-  // Invert to id→name
-  const projectIdToName = Object.fromEntries(Object.entries(projectNameMap).map(([k, v]) => [v, k]));
-
   // Fetch all three lists in parallel
-  const [clients, projects, rawItems] = await Promise.all([
-    clientDbId  ? fetchAllPages(clientDbId,  token) : Promise.resolve([]),
-    projectsDbId? fetchAllPages(projectsDbId, token) : Promise.resolve([]),
-    itemDbId    ? fetchAllPages(itemDbId,     token) : Promise.resolve([]),
+  const [clientPages, projectPages, itemPages] = await Promise.all([
+    clientDbId   ? fetchAllPages(clientDbId,   token) : Promise.resolve([]),
+    projectsDbId ? fetchAllPages(projectsDbId, token) : Promise.resolve([]),
+    itemDbId     ? fetchAllPages(itemDbId,     token) : Promise.resolve([]),
   ]);
 
   function extractTitle(page) {
     const titleProp = Object.values(page.properties || {}).find(p => p.type === 'title');
-    return titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text || '';
+    return (titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text) || '';
   }
 
   function itemCodePrefix(name) {
@@ -312,19 +304,48 @@ async function handleReferenceData(token) {
     return (sep === -1 ? name : name.slice(0, sep)).trim();
   }
 
-  const clientList  = clients.map(p => ({ name: extractTitle(p) })).filter(c => c.name).sort((a,b) => a.name.localeCompare(b.name));
-  const projectList = projects.map(p => ({ name: extractTitle(p) })).filter(p => p.name).sort((a,b) => a.name.localeCompare(b.name));
-  const itemList    = rawItems.map(p => {
+  // client page id → name
+  const clientIdToName = {};
+  clientPages.forEach(p => {
+    const name = extractTitle(p);
+    if (name) clientIdToName[p.id] = name;
+  });
+
+  // project page id → { name, client }
+  // Projects have a relation back to the Client DB; we identify it by checking
+  // whether the relation target ID exists in clientIdToName.
+  const projectIdToInfo = {};
+  const projectList = projectPages.map(p => {
     const name = extractTitle(p);
     if (!name) return null;
-    // Find linked project name via relation
-    let project = '';
+    let clientName = '';
     Object.values(p.properties || {}).forEach(prop => {
-      if (prop.type === 'relation' && prop.relation && prop.relation[0]) {
-        project = projectIdToName[prop.relation[0].id] || '';
+      if (prop.type === 'relation' && prop.relation && !clientName) {
+        for (const rel of prop.relation) {
+          if (clientIdToName[rel.id]) { clientName = clientIdToName[rel.id]; break; }
+        }
       }
     });
-    return { name, code: itemCodePrefix(name), project };
+    projectIdToInfo[p.id] = { name, client: clientName };
+    return { name, client: clientName };
+  }).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+
+  const clientList = Object.values(clientIdToName)
+    .map(name => ({ name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  // items: resolve project (and transitively client) via project relation
+  const itemList = itemPages.map(p => {
+    const name = extractTitle(p);
+    if (!name) return null;
+    let projectName = '', clientName = '';
+    Object.values(p.properties || {}).forEach(prop => {
+      if (prop.type === 'relation' && prop.relation && prop.relation[0] && !projectName) {
+        const info = projectIdToInfo[prop.relation[0].id];
+        if (info) { projectName = info.name; clientName = info.client; }
+      }
+    });
+    return { name, code: itemCodePrefix(name), project: projectName, client: clientName };
   }).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
 
   return respond(200, { clients: clientList, projects: projectList, items: itemList });

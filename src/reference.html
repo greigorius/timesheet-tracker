@@ -15,7 +15,7 @@
   --blue:#3B82F6;--blue-dim:#1D3A6E;--blue-bright:#60A5FA;
   --green:#10B981;--green-dim:#0D3326;
   --amber:#F59E0B;--amber-dim:#3B2800;
-  --red:#EF4444;--red-dim:#3B0D0D;
+  --red:#EF4444;
   --mono:'JetBrains Mono',monospace;--sans:'Inter',sans-serif;
 }
 html{font-size:14px}
@@ -25,7 +25,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
 
 /* ── HEADER ── */
-.hdr{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;height:52px;display:flex;align-items:center;justify-content:space-between}
+.hdr{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;height:52px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
 .hdr-l{display:flex;align-items:center;gap:14px}
 .wordmark{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--text);letter-spacing:.08em}
 .wordmark span{color:var(--blue)}
@@ -33,42 +33,77 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 .pg-title{font-size:12px;color:var(--muted)}
 .hdr-r{display:flex;align-items:center;gap:12px}
 .last-updated{font-family:var(--mono);font-size:10px;color:var(--dim)}
+.pill-btn{font-family:var(--mono);font-size:10px;color:var(--muted);background:none;border:1px solid var(--border);padding:3px 9px;border-radius:2px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.pill-btn:hover{color:var(--text);border-color:var(--border2)}
 
 /* ── INTRO ── */
-.intro{background:var(--blue-dim);border:1px solid rgba(59,130,246,.3);border-radius:4px;padding:12px 16px;margin:16px 24px 0;display:flex;align-items:flex-start;gap:10px;font-size:12px;color:var(--blue-bright);line-height:1.6}
-.intro strong{font-weight:600}
+.intro{background:var(--blue-dim);border:1px solid rgba(59,130,246,.25);border-radius:4px;padding:11px 16px;margin:16px 24px 0;font-size:12px;color:var(--blue-bright);line-height:1.6;display:flex;gap:10px;align-items:flex-start}
 
-/* ── MAIN ── */
-.main{padding:16px 24px;display:grid;grid-template-columns:200px 240px 1fr;gap:14px;align-items:start}
+/* ── GLOBAL SEARCH ── */
+.global-search-wrap{padding:12px 24px 0}
+.global-search{width:100%;max-width:480px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:12px;padding:7px 12px;outline:none;transition:border-color .15s}
+.global-search:focus{border-color:var(--blue)}
+.global-search::placeholder{color:var(--dim)}
+
+/* ── MAIN 3-COL ── */
+.main{padding:14px 24px 32px;display:grid;grid-template-columns:180px 260px 1fr;gap:14px;align-items:start}
 
 /* ── PANEL ── */
 .panel{background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden}
 .ph{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid var(--border);background:var(--surface2);gap:8px}
 .pt{font-family:var(--mono);font-size:10px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
-.ph-r{display:flex;align-items:center;gap:6px}
-.count-badge{font-family:var(--mono);font-size:10px;color:var(--dim)}
+.count-badge{font-family:var(--mono);font-size:10px;color:var(--dim);flex-shrink:0}
 
-/* ── SEARCH ── */
-.search-wrap{padding:8px 10px;border-bottom:1px solid var(--border);background:var(--surface)}
-.search-input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:11px;padding:5px 9px;outline:none;transition:border-color .15s}
-.search-input:focus{border-color:var(--blue)}
-.search-input::placeholder{color:var(--dim)}
+/* ── SCROLLABLE LIST ── */
+.ref-list{max-height:calc(100vh - 220px);overflow-y:auto}
 
-/* ── LIST ── */
-.ref-list{max-height:520px;overflow-y:auto}
-.ref-item{display:flex;align-items:center;justify-content:space-between;padding:7px 12px;border-bottom:1px solid rgba(37,51,82,.5);gap:8px;cursor:pointer;transition:background .1s}
+/* ── CLIENT SECTION HEADER ── */
+.client-hdr{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 12px;
+  background:var(--surface3);
+  border-bottom:1px solid var(--border);
+  border-top:1px solid var(--border);
+  font-family:var(--mono);font-size:10px;font-weight:600;
+  color:var(--blue-bright);
+  text-transform:uppercase;letter-spacing:.06em;
+  position:sticky;top:0;z-index:2;
+}
+.client-hdr:first-child{border-top:none}
+.client-dot{width:6px;height:6px;border-radius:50%;background:var(--blue);flex-shrink:0}
+
+/* ── PROJECT SUB-HEADER (inside items col) ── */
+.project-hdr{
+  padding:4px 12px 4px 20px;
+  background:var(--surface2);
+  border-bottom:1px solid rgba(37,51,82,.5);
+  font-family:var(--mono);font-size:9px;
+  color:var(--muted);
+  text-transform:uppercase;letter-spacing:.08em;
+  position:sticky;top:28px;z-index:1;
+}
+
+/* ── REF ROW ── */
+.ref-item{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 12px;
+  border-bottom:1px solid rgba(37,51,82,.4);
+  cursor:pointer;transition:background .1s;
+  min-width:0;
+}
 .ref-item:last-child{border-bottom:none}
 .ref-item:hover{background:var(--surface2)}
 .ref-item.copied{background:rgba(16,185,129,.08)}
-.ref-name{font-family:var(--mono);font-size:11px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ref-name.dim-name{color:var(--muted)}
+/* project rows get an indent */
+.ref-item.indent{padding-left:20px}
+/* item rows get double indent */
+.ref-item.indent2{padding-left:28px}
+
+.ref-name{font-family:var(--mono);font-size:11px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .ref-code{font-family:var(--mono);font-size:10px;color:var(--dim);flex-shrink:0}
 .copy-icon{font-size:11px;color:var(--dim);flex-shrink:0;opacity:0;transition:opacity .15s}
 .ref-item:hover .copy-icon{opacity:1}
 .ref-item.copied .copy-icon{opacity:1;color:var(--green)}
-
-/* item section header */
-.ref-section-hdr{padding:5px 12px;background:var(--surface2);border-bottom:1px solid var(--border);font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;position:sticky;top:0;z-index:1}
 
 /* ── EMPTY / LOADING ── */
 .empty{padding:24px;text-align:center;color:var(--dim);font-family:var(--mono);font-size:11px;line-height:2}
@@ -77,17 +112,23 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 
 /* ── COPY TOAST ── */
 .copy-toast{
-  position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(60px);
+  position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);
   background:var(--surface2);border:1px solid var(--green);border-radius:4px;
-  padding:7px 16px;font-family:var(--mono);font-size:11px;color:var(--green);
+  padding:7px 18px;font-family:var(--mono);font-size:11px;color:var(--green);
   transition:transform .2s cubic-bezier(.22,1,.36,1);white-space:nowrap;
-  box-shadow:0 4px 20px rgba(0,0,0,.5);z-index:999
+  box-shadow:0 4px 20px rgba(0,0,0,.5);z-index:999;pointer-events:none
 }
 .copy-toast.show{transform:translateX(-50%) translateY(0)}
 
-/* ── REFRESH BTN ── */
-.pill-btn{font-family:var(--mono);font-size:10px;color:var(--muted);background:none;border:1px solid var(--border);padding:3px 9px;border-radius:2px;cursor:pointer;transition:all .15s;white-space:nowrap}
-.pill-btn:hover{color:var(--text);border-color:var(--border2)}
+/* ── NO CLIENT badge ── */
+.no-client-hdr{
+  padding:6px 12px;
+  background:var(--surface2);border-bottom:1px solid var(--border);border-top:1px solid var(--border);
+  font-family:var(--mono);font-size:10px;color:var(--dim);
+  text-transform:uppercase;letter-spacing:.06em;
+  position:sticky;top:0;z-index:2;
+}
+.no-client-hdr:first-child{border-top:none}
 </style>
 </head>
 <body>
@@ -106,7 +147,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 
 <div class="intro">
   <span>ℹ</span>
-  <div><strong>Copy-paste reference for timesheet entry.</strong> Click any row to copy the exact name to your clipboard — paste it directly into your timesheet to ensure a precise match when importing.</div>
+  <div><strong>Copy-paste reference for timesheet entry.</strong> Click any row to copy the exact name to your clipboard — paste it directly into your timesheet to ensure a precise match when importing. All data is grouped by client.</div>
+</div>
+
+<div class="global-search-wrap">
+  <input class="global-search" id="globalSearch" placeholder="Search across clients, projects and items…" oninput="filterAll(this.value)">
 </div>
 
 <div class="main">
@@ -115,38 +160,29 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
   <div class="panel">
     <div class="ph">
       <div class="pt">Clients</div>
-      <div class="ph-r"><span class="count-badge" id="clientCount"></span></div>
-    </div>
-    <div class="search-wrap">
-      <input class="search-input" id="clientSearch" placeholder="Search clients…" oninput="filterList('client')">
+      <span class="count-badge" id="clientCount"></span>
     </div>
     <div class="ref-list" id="clientList">
       <div class="empty"><span class="spin"></span><br>Loading…</div>
     </div>
   </div>
 
-  <!-- PROJECTS -->
+  <!-- PROJECTS grouped by client -->
   <div class="panel">
     <div class="ph">
       <div class="pt">Projects</div>
-      <div class="ph-r"><span class="count-badge" id="projectCount"></span></div>
-    </div>
-    <div class="search-wrap">
-      <input class="search-input" id="projectSearch" placeholder="Search projects…" oninput="filterList('project')">
+      <span class="count-badge" id="projectCount"></span>
     </div>
     <div class="ref-list" id="projectList">
       <div class="empty"><span class="spin"></span><br>Loading…</div>
     </div>
   </div>
 
-  <!-- ITEMS -->
+  <!-- ITEMS grouped by client → project -->
   <div class="panel">
     <div class="ph">
       <div class="pt">Items</div>
-      <div class="ph-r"><span class="count-badge" id="itemCount"></span></div>
-    </div>
-    <div class="search-wrap">
-      <input class="search-input" id="itemSearch" placeholder="Search items…" oninput="filterList('item')">
+      <span class="count-badge" id="itemCount"></span>
     </div>
     <div class="ref-list" id="itemList">
       <div class="empty"><span class="spin"></span><br>Loading…</div>
@@ -155,7 +191,6 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 
 </div>
 
-<!-- Copy confirmation toast -->
 <div class="copy-toast" id="copyToast"></div>
 
 <script>
@@ -165,6 +200,7 @@ let allClients  = [];
 let allProjects = [];
 let allItems    = [];
 
+// ── LOAD ──────────────────────────────────────
 async function loadAll(){
   setLoading();
   try{
@@ -177,15 +213,10 @@ async function loadAll(){
     const data = await res.json();
     allClients  = (data.clients  || []).sort((a,b) => a.name.localeCompare(b.name));
     allProjects = (data.projects || []).sort((a,b) => a.name.localeCompare(b.name));
-    allItems    = (data.items    || []).sort((a,b) => {
-      // Sort by code prefix numerically where possible
-      const na = parseFloat(a.code) || 0;
-      const nb = parseFloat(b.code) || 0;
-      if(na && nb && na !== nb) return na - nb;
-      return a.name.localeCompare(b.name);
-    });
-    document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString('en-GB',{hour12:false});
-    renderAll();
+    allItems    = (data.items    || []).sort((a,b) => a.name.localeCompare(b.name));
+    document.getElementById('lastUpdated').textContent =
+      'Updated ' + new Date().toLocaleTimeString('en-GB',{hour12:false});
+    filterAll('');
   } catch(e){
     ['clientList','projectList','itemList'].forEach(id => {
       document.getElementById(id).innerHTML =
@@ -195,110 +226,153 @@ async function loadAll(){
 }
 
 function setLoading(){
-  ['clientList','projectList','itemList'].forEach(id => {
+  ['clientList','projectList','itemList'].forEach(id =>
     document.getElementById(id).innerHTML =
-      '<div class="empty"><span class="spin"></span><br>Loading…</div>';
+      '<div class="empty"><span class="spin"></span><br>Loading…</div>'
+  );
+  ['clientCount','projectCount','itemCount'].forEach(id =>
+    document.getElementById(id).textContent = ''
+  );
+}
+
+// ── FILTER & RENDER ───────────────────────────
+function filterAll(q){
+  q = (q || '').trim().toLowerCase();
+  renderClients(q);
+  renderProjects(q);
+  renderItems(q);
+}
+
+// ── CLIENTS ──
+function renderClients(q){
+  const items = q ? allClients.filter(c => c.name.toLowerCase().includes(q)) : allClients;
+  document.getElementById('clientCount').textContent = items.length + (q ? ' of '+allClients.length : '');
+  document.getElementById('clientList').innerHTML = items.length
+    ? items.map(c => `<div class="ref-item" onclick="copyText('${esc(c.name).replace(/'/g,"&#39;")}',this)" title="Click to copy">
+        <span class="ref-name">${esc(c.name)}</span>
+        <span class="copy-icon">⎘</span>
+      </div>`).join('')
+    : '<div class="empty">No matches.</div>';
+}
+
+// ── PROJECTS grouped by client ──
+function renderProjects(q){
+  const items = q
+    ? allProjects.filter(p => p.name.toLowerCase().includes(q) || (p.client||'').toLowerCase().includes(q))
+    : allProjects;
+
+  document.getElementById('projectCount').textContent = items.length + (q ? ' of '+allProjects.length : '');
+
+  if(!items.length){
+    document.getElementById('projectList').innerHTML = '<div class="empty">No matches.</div>';
+    return;
+  }
+
+  // Group by client
+  const groups = groupBy(items, p => p.client || '');
+  const clientNames = Object.keys(groups).sort((a,b) => a ? (b ? a.localeCompare(b) : -1) : 1);
+  // Unlinked projects last
+  const sorted = [...clientNames.filter(Boolean), ...clientNames.filter(n => !n)];
+
+  let html = '';
+  sorted.forEach(client => {
+    html += client
+      ? `<div class="client-hdr"><span class="client-dot"></span>${esc(client)}</div>`
+      : `<div class="no-client-hdr">— No client —</div>`;
+    html += groups[client]
+      .sort((a,b) => a.name.localeCompare(b.name))
+      .map(p => `<div class="ref-item indent" onclick="copyText('${esc(p.name).replace(/'/g,"&#39;")}',this)" title="Click to copy">
+          <span class="ref-name">${esc(p.name)}</span>
+          <span class="copy-icon">⎘</span>
+        </div>`).join('');
   });
-  document.getElementById('clientCount').textContent  = '';
-  document.getElementById('projectCount').textContent = '';
-  document.getElementById('itemCount').textContent    = '';
+
+  document.getElementById('projectList').innerHTML = html;
 }
 
-function renderAll(){
-  filterList('client');
-  filterList('project');
-  filterList('item');
-}
+// ── ITEMS grouped by client → project ──
+function renderItems(q){
+  const items = q
+    ? allItems.filter(i =>
+        i.name.toLowerCase().includes(q) ||
+        (i.code   ||'').toLowerCase().includes(q) ||
+        (i.project||'').toLowerCase().includes(q) ||
+        (i.client ||'').toLowerCase().includes(q))
+    : allItems;
 
-function filterList(type){
-  const searchEl = document.getElementById(type + 'Search');
-  const q = searchEl ? searchEl.value.trim().toLowerCase() : '';
+  document.getElementById('itemCount').textContent = items.length + (q ? ' of '+allItems.length : '');
 
-  if(type === 'client'){
-    const items = q ? allClients.filter(c => c.name.toLowerCase().includes(q)) : allClients;
-    document.getElementById('clientCount').textContent = items.length + ' of ' + allClients.length;
-    document.getElementById('clientList').innerHTML = items.length
-      ? items.map(c => itemRow(c.name, '', c.name)).join('')
-      : '<div class="empty">No matches.</div>';
+  if(!items.length){
+    document.getElementById('itemList').innerHTML = '<div class="empty">No matches.</div>';
+    return;
+  }
 
-  } else if(type === 'project'){
-    const items = q ? allProjects.filter(p => p.name.toLowerCase().includes(q)) : allProjects;
-    document.getElementById('projectCount').textContent = items.length + ' of ' + allProjects.length;
-    document.getElementById('projectList').innerHTML = items.length
-      ? items.map(p => itemRow(p.name, '', p.name)).join('')
-      : '<div class="empty">No matches.</div>';
+  // Group by client, then project within each client
+  const byClient = groupBy(items, i => i.client || '');
+  const clientNames = [
+    ...Object.keys(byClient).filter(Boolean).sort((a,b) => a.localeCompare(b)),
+    ...Object.keys(byClient).filter(n => !n),
+  ];
 
-  } else if(type === 'item'){
-    const items = q
-      ? allItems.filter(i => i.name.toLowerCase().includes(q) || (i.code||'').toLowerCase().includes(q) || (i.project||'').toLowerCase().includes(q))
-      : allItems;
-    document.getElementById('itemCount').textContent = items.length + ' of ' + allItems.length;
+  let html = '';
+  clientNames.forEach(client => {
+    html += client
+      ? `<div class="client-hdr"><span class="client-dot"></span>${esc(client)}</div>`
+      : `<div class="no-client-hdr">— No client —</div>`;
 
-    if(!items.length){
-      document.getElementById('itemList').innerHTML = '<div class="empty">No matches.</div>';
-      return;
-    }
+    const clientItems = byClient[client];
+    const byProject = groupBy(clientItems, i => i.project || '');
+    const projNames = [
+      ...Object.keys(byProject).filter(Boolean).sort((a,b) => a.localeCompare(b)),
+      ...Object.keys(byProject).filter(n => !n),
+    ];
 
-    // Group by project
-    const byProject = {};
-    const noProject = [];
-    items.forEach(it => {
-      if(it.project){
-        if(!byProject[it.project]) byProject[it.project] = [];
-        byProject[it.project].push(it);
-      } else {
-        noProject.push(it);
+    projNames.forEach(proj => {
+      if(proj){
+        html += `<div class="project-hdr">${esc(proj)}</div>`;
       }
-    });
-
-    let html = '';
-    const projects = Object.keys(byProject).sort();
-    projects.forEach(proj => {
-      html += `<div class="ref-section-hdr">${esc(proj)}</div>`;
       html += byProject[proj]
         .sort((a,b) => a.name.localeCompare(b.name))
-        .map(it => itemRow(it.name, it.code, it.name)).join('');
+        .map(it => {
+          const indent = proj ? 'indent2' : 'indent';
+          return `<div class="ref-item ${indent}" onclick="copyText('${esc(it.name).replace(/'/g,"&#39;")}',this)" title="Click to copy: ${esc(it.name)}">
+            <span class="ref-name">${esc(it.name)}</span>
+            ${it.code ? `<span class="ref-code">${esc(it.code)}</span>` : ''}
+            <span class="copy-icon">⎘</span>
+          </div>`;
+        }).join('');
     });
-    if(noProject.length){
-      html += `<div class="ref-section-hdr">— No project —</div>`;
-      html += noProject.map(it => itemRow(it.name, it.code, it.name)).join('');
-    }
+  });
 
-    document.getElementById('itemList').innerHTML = html;
-  }
+  document.getElementById('itemList').innerHTML = html;
 }
 
-function itemRow(displayName, code, copyValue){
-  const codeHtml = code ? `<span class="ref-code">${esc(code)}</span>` : '';
-  return `<div class="ref-item" onclick="copyText('${esc(copyValue).replace(/'/g,"&#39;")}', this)" title="Click to copy: ${esc(copyValue)}">
-    <span class="ref-name">${esc(displayName)}</span>
-    ${codeHtml}
-    <span class="copy-icon">⎘</span>
-  </div>`;
+// ── UTILS ──────────────────────────────────────
+function groupBy(arr, keyFn){
+  const out = {};
+  arr.forEach(item => {
+    const k = keyFn(item);
+    if(!out[k]) out[k] = [];
+    out[k].push(item);
+  });
+  return out;
 }
 
 let _toastTimer;
 function copyText(text, el){
-  // Decode HTML entities if needed
   const decoded = new DOMParser().parseFromString(text, 'text/html').body.textContent;
   navigator.clipboard.writeText(decoded).then(()=>{
-    // Flash row
     if(el){
       el.classList.add('copied');
-      el.querySelector('.copy-icon').textContent = '✓';
-      setTimeout(()=>{
-        el.classList.remove('copied');
-        el.querySelector('.copy-icon').textContent = '⎘';
-      }, 1400);
+      const icon = el.querySelector('.copy-icon');
+      if(icon){ const prev = icon.textContent; icon.textContent='✓'; setTimeout(()=>{ el.classList.remove('copied'); icon.textContent=prev; },1400); }
     }
-    // Show toast
     const toast = document.getElementById('copyToast');
     toast.textContent = 'Copied: ' + decoded;
     toast.classList.add('show');
     clearTimeout(_toastTimer);
     _toastTimer = setTimeout(()=> toast.classList.remove('show'), 1800);
   }).catch(()=>{
-    // Fallback: select text in a temporary input
     const inp = document.createElement('input');
     inp.value = decoded;
     document.body.appendChild(inp);
@@ -313,7 +387,6 @@ function esc(s){
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Auto-load on page open
 loadAll();
 </script>
 </body>
