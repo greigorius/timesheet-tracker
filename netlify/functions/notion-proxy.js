@@ -19,6 +19,19 @@
 
 const NOTION_VERSION = '2022-06-28';
 
+/**
+ * NAME_ALIASES — maps alternative/informal person names (lowercase) to the
+ * canonical name stored in the Notion People database.
+ * Used during validate-relations person matching so that nicknames or
+ * alternative spellings in timesheets resolve to the correct Notion record.
+ *
+ * Key:   normalised (lowercase) name as it appears in the timesheet
+ * Value: exact name as it appears in Notion (case is handled by findInIndex)
+ */
+const NAME_ALIASES = {
+  'xavier querol': 'Xavi Querol',
+};
+
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 204, headers: corsHeaders(), body: '' };
@@ -151,7 +164,8 @@ async function handleValidateRelations(body, token) {
 
     // Person — hard error if missing or unresolved
     if (row.person) {
-      const id = findInIndex(personIdx, row.person, 'exact');
+      const personLookup = NAME_ALIASES[(row.person).toLowerCase()] || row.person;
+      const id = findInIndex(personIdx, personLookup, 'exact');
       if (id) {
         out.person_id = id;
       } else {

@@ -344,7 +344,10 @@ td.dim{color:var(--muted)}
 
 /* ── IMPORT QUEUE (Col 2) ── */
 .queue-empty{font-size:11px;color:var(--dim);text-align:center;padding:20px 10px;border:1px dashed var(--border);border-radius:3px;line-height:1.8}
-.queue-row{display:flex;align-items:center;gap:7px;padding:6px 9px;border-radius:3px;background:var(--surface2);border:1px solid var(--border);margin-bottom:4px;min-width:0}
+.queue-row{display:flex;flex-wrap:wrap;align-items:center;gap:7px;padding:6px 9px;border-radius:3px;background:var(--surface2);border:1px solid var(--border);margin-bottom:4px;min-width:0}
+.queue-detail{flex-basis:100%;font-family:var(--mono);font-size:10px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
+.queue-detail.qd-error{color:var(--red);opacity:.85}
+.queue-detail.qd-flagged{color:var(--amber);opacity:.85}
 .queue-row.qs-processing{border-color:var(--blue)}
 .queue-row.qs-imported{border-color:rgba(16,185,129,.4);background:rgba(16,185,129,.04)}
 .queue-row.qs-flagged{border-color:rgba(245,158,11,.4);background:rgba(245,158,11,.04)}
@@ -907,10 +910,13 @@ function renderQueue(){
     };
     const [badgeCls,badgeTxt]=statusMap[q.status]||statusMap.pending;
     const removable=q.status!=='processing';
-    return `<div class="queue-row qs-${q.status}" title="${esc(q.detail||q.name)}">
-      <span class="queue-name">${esc(q.name)}</span>
+    const showDetail=q.detail&&(q.status==='error'||q.status==='flagged');
+    const detailCls=q.status==='error'?'qd-error':'qd-flagged';
+    return `<div class="queue-row qs-${q.status}">
+      <span class="queue-name" title="${esc(q.name)}">${esc(q.name)}</span>
       <span class="queue-badge ${badgeCls}">${badgeTxt}</span>
       ${removable?`<button class="queue-rm" onclick="removeFromQueue('${q.name.replace(/'/g,"\\'")}')">×</button>`:'<span style="width:22px;flex-shrink:0"></span>'}
+      ${showDetail?`<span class="queue-detail ${detailCls}" title="${esc(q.detail)}">${esc(q.detail)}</span>`:''}
     </div>`;
   }).join('');
 

@@ -103,8 +103,9 @@ exports.handler = async (event) => {
     }
 
     // Fall back to extracting person from filename: YYYY-WXX_FirstnameSurname.xlsx
+    // Also accepts YYYY_WXX_ (underscore separator) e.g. 2026_W23_XaviQuerol.xlsx
     if (!person && filename) {
-      const match = filename.replace(/\.xlsx$/i, '').match(/^\d{4}-W\d+_(.+)$/i);
+      const match = filename.replace(/\.xlsx$/i, '').match(/^\d{4}[-_]W\d+_(.+)$/i);
       if (match) {
         person = match[1].replace(/_/g, ' ');
       }
