@@ -813,9 +813,11 @@ async function scanInbox(){
 }
 
 let scannedFiles=[];
+let importedFileNames=new Set(); // files successfully imported this session — hidden from Col 1
 
 function renderFileList(files){
   scannedFiles=files;
+  importedFileNames=new Set(); // reset on rescan — Dropbox list is fresh
   const addAllBtn=document.getElementById('addAllBtn');
   if(addAllBtn) addAllBtn.style.display=files.length?'':'none';
   renderFileListUI();
@@ -824,11 +826,13 @@ function renderFileList(files){
 
 function renderFileListUI(){
   const list=document.getElementById('fileList');
-  if(!scannedFiles.length){
+  const visibleFiles=scannedFiles.filter(f=>!importedFileNames.has(f.name));
+  if(!visibleFiles.length){
     list.innerHTML='<div class="empty" style="padding:16px;color:var(--muted)">No files in Dropbox Inbox.</div>';
     return;
   }
   list.innerHTML=scannedFiles.map((f,i)=>{
+    if(importedFileNames.has(f.name)) return ''; // remove from list once successfully imported
     const unverified=f.headers==null;
     const map=unverified?{mapped:[],missing:[]}:mapHeaders(f.headers||[]);
     const ok=!unverified&&map.missing.length===0;
@@ -984,6 +988,7 @@ async function startImport(){
       } else {
         qItem.status='imported';
         qItem.detail='Imported successfully';
+        importedFileNames.add(qItem.name); // remove from Col 1 file list
         toast(qItem.name+': imported ✓','s');
       }
     }catch(e){
