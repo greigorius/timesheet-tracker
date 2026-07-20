@@ -815,11 +815,13 @@ async function scanInbox(){
 let scannedFiles=[];
 let importedFileNames=new Set(); // files successfully imported this session — hidden from Col 1
 
-function renderFileList(files){
-  scannedFiles=files;
+function renderFileList(raw){
+  // Normalise whatever Make sends: unwrap {files:[]} / {items:[]}, drop null/nameless entries
+  const arr=Array.isArray(raw)?raw:(raw&&Array.isArray(raw.files)?raw.files:Array.isArray(raw.items)?raw.items:[]);
+  scannedFiles=arr.filter(f=>f&&f.name);
   importedFileNames=new Set(); // reset on rescan — Dropbox list is fresh
   const addAllBtn=document.getElementById('addAllBtn');
-  if(addAllBtn) addAllBtn.style.display=files.length?'':'none';
+  if(addAllBtn) addAllBtn.style.display=scannedFiles.length?'':'none';
   renderFileListUI();
   document.getElementById('step1num').className='step-num done';
 }
@@ -828,7 +830,8 @@ function renderFileListUI(){
   const list=document.getElementById('fileList');
   const visibleFiles=scannedFiles.filter(f=>!importedFileNames.has(f.name));
   if(!visibleFiles.length){
-    list.innerHTML='<div class="empty" style="padding:16px;color:var(--muted)">No files in Dropbox Inbox.</div>';
+    const msg=scannedFiles.length?'All files imported — inbox is clear.':'Inbox is currently empty.';
+    list.innerHTML='<div class="empty" style="padding:16px;color:var(--muted)">'+msg+'</div>';
     return;
   }
   list.innerHTML=scannedFiles.map((f,i)=>{
