@@ -376,6 +376,8 @@ td.dim{color:var(--muted)}
 .file-add-btn.added{background:var(--green-dim);color:var(--green);border-color:rgba(16,185,129,.4);cursor:default}
 .file-row.in-queue{opacity:.55}
 .file-row.in-queue:hover{border-color:var(--border)}
+.reval-btn{background:none;border:1px solid var(--border2);color:var(--dim);font-size:10px;padding:1px 6px;border-radius:2px;cursor:pointer;flex-shrink:0;line-height:1.6;transition:color .15s,border-color .15s}
+.reval-btn:hover{color:var(--text);border-color:var(--blue)}
 </style>
 </head>
 <body>
@@ -831,22 +833,45 @@ let scannedFiles=[];
 let importedFileNames=new Set(); // files successfully imported this session — hidden from Col 1
 let validationResults={}; // filename → {state:'none'|'checking'|'ok'|'warn'|'err', ...data}
 
+// ── Validation localStorage cache ─────────────────────────────────────────────
+// Key: filename + modified timestamp so a re-uploaded file auto-invalidates.
+// Survives page refresh; user can force re-check per file via the ↻ button.
+const VAL_CACHE_KEY='adl_valcache';
+const VAL_CACHE_MAX_AGE_MS=7*24*60*60*1000; // 7 days
+function loadValCache(){try{return JSON.parse(localStorage.getItem(VAL_CACHE_KEY)||'{}');}catch{return{};}}
+function saveValCache(c){try{localStorage.setItem(VAL_CACHE_KEY,JSON.stringify(c));}catch{}}
+function valCacheKey(f){return f.name+'__'+(f.modified||'');}
+function purgeValCache(filename){const c=loadValCache();Object.keys(c).forEach(k=>{if(k.startsWith(filename+'__'))delete c[k];});saveValCache(c);}
+
 function renderFileList(raw){
   // Normalise whatever Make sends: unwrap {files:[]} / {items:[]}, drop null/nameless entries
   const arr=Array.isArray(raw)?raw:(raw&&Array.isArray(raw.files)?raw.files:Array.isArray(raw.items)?raw.items:[]);
   scannedFiles=arr.filter(f=>f&&f.name);
   importedFileNames=new Set(); // reset on rescan — Dropbox list is fresh
-  validationResults={};        // reset validation on rescan
+  validationResults={};        // reset in-memory; will be repopulated from cache below
   const addAllBtn=document.getElementById('addAllBtn');
   if(addAllBtn) addAllBtn.style.display=scannedFiles.length?'':'none';
+
+  // ── Restore cached validation results ───────────────────────────────────────
+  if(cfg.validateUrl){
+    const valCache=loadValCache();
+    const now=Date.now();
+    scannedFiles.forEach(f=>{
+      const cached=valCache[valCacheKey(f)];
+      if(cached&&(now-cached.cachedAt)<VAL_CACHE_MAX_AGE_MS){
+        validationResults[f.name]=cached;
+      }
+    });
+  }
+
   renderFileListUI();
   document.getElementById('step1num').className='step-num done';
-  // Kick off per-file validation staggered 2s apart — avoids hammering
-  // Notion API simultaneously across all files, which causes rate-limit timeouts
+
+  // ── Validate only files without a cached result, staggered 2s apart ─────────
   if(cfg.validateUrl){
     let delay=0;
     scannedFiles.forEach(f=>{
-      if(!importedFileNames.has(f.name)){
+      if(!importedFileNames.has(f.name)&&!validationResults[f.name]){
         setTimeout(()=>triggerValidationForFile(f), delay);
         delay+=2000;
       }
@@ -875,7 +900,21 @@ async function triggerValidationForFile(f){
   }catch(e){
     validationResults[f.name]={state:'err',issue_count:1,error:e.message};
   }
+  // Persist to localStorage (only cache ok/warn/err — not transient 'checking')
+  if(validationResults[f.name]&&validationResults[f.name].state!=='checking'){
+    const c=loadValCache();
+    c[valCacheKey(f)]={...validationResults[f.name],cachedAt:Date.now()};
+    saveValCache(c);
+  }
   renderFileListUI();
+}
+
+function revalidateFile(filename){
+  // Clear cache for this file (all modified-date variants)
+  purgeValCache(filename);
+  delete validationResults[filename];
+  const f=scannedFiles.find(sf=>sf.name===filename);
+  if(f) triggerValidationForFile(f);
 }
 
 function toggleValDetail(idx){
@@ -918,7 +957,7 @@ function renderFileListUI(){
       const n=vr.issue_count||1;
       const cls=vr.state==='err'?'err':'warn';
       const icon=vr.state==='err'?'✗':'⚠';
-      badge=`<span class="compat-badge ${cls}" style="cursor:pointer" onclick="event.stopPropagation();toggleValDetail(${i})" title="Click to see issues">${icon} ${n} issue${n===1?'':'s'} ▾</span>`;
+      badge=`<span class="compat-badge ${cls}" style="cursor:pointer" onclick="event.stopPropagation();toggleValDetail(${i})" title="Click to see issues">${icon} ${n} issue${n===1?'':'s'} ▾</span><button class="reval-btn" onclick="event.stopPropagation();revalidateFile('${esc(f.name)}')" title="Re-validate this file">↻</button>`;
     } else {
       badge=`<span class="compat-badge err">✗ Error</span>`;
     }
@@ -1123,6 +1162,7 @@ async function startImport(){
         qItem.status='imported';
         qItem.detail='Imported successfully';
         importedFileNames.add(qItem.name); // remove from Col 1 file list
+        purgeValCache(qItem.name);          // no need to keep validation cache for imported file
         toast(qItem.name+': imported ✓','s');
       } else {
         // 200 OK but no recognised success status — Make-level error or misconfigured scenario
