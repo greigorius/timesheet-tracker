@@ -31,6 +31,15 @@ const XLSX = require('xlsx');
 
 const NOTION_VERSION = '2022-06-28';
 
+// ---------------------------------------------------------------------------
+// MODULE-LEVEL NOTION CACHE
+// Netlify reuses warm function instances — cache indices for 5 min so that
+// parallel/rapid validation calls don't each hit the Notion API from scratch.
+// ---------------------------------------------------------------------------
+let _notionCache = null;
+let _notionCacheTs = 0;
+const NOTION_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 // Mirrors the aliases in notion-proxy.js — keep in sync
 const NAME_ALIASES = {
   'xavier querol': 'Xavi Querol',
@@ -122,8 +131,11 @@ exports.handler = async (event) => {
     const colHours   = headers.findIndex(h => h.toLowerCase() === 'hours');
     const colDesc    = headers.findIndex(h => /description/i.test(h));
 
+    // Column B (date) must be non-empty — rows without a date are blank spacers
+    const dateColIdx = colDate >= 0 ? colDate : 1;
     const rawDataRows = rawRows.slice(headerRowIdx + 1).filter(row =>
-      row.some(cell => String(cell).trim().length > 0)
+      row.some(cell => String(cell).trim().length > 0) &&
+      String(row[dateColIdx] || '').trim().length > 0
     );
 
     dataRows = rawDataRows.map((r, idx) => ({
@@ -155,14 +167,19 @@ exports.handler = async (event) => {
     }
   }
 
-  // ── Notion lookups ─────────────────────────────────────────────────────────
+  // ── Notion lookups (cached) ────────────────────────────────────────────────
   const timesheetsDbId = process.env.NOTION_TIMESHEETS_DB;
   const projectsDbId   = process.env.NOTION_PROJECTS_DB;
 
   let personIdx = {}, clientIdx = {}, itemIdx = [], projectIdx = {};
   let notionAvailable = false;
 
-  if (timesheetsDbId) {
+  const now = Date.now();
+  if (_notionCache && (now - _notionCacheTs) < NOTION_CACHE_TTL_MS) {
+    // Cache hit — reuse indices
+    ({ personIdx, clientIdx, itemIdx, projectIdx } = _notionCache);
+    notionAvailable = true;
+  } else if (timesheetsDbId) {
     try {
       const schemaRes = await fetch(
         'https://api.notion.com/v1/databases/' + timesheetsDbId,
@@ -176,16 +193,19 @@ exports.handler = async (event) => {
         const itemDbId   = p.Item   && p.Item.relation   && p.Item.relation.database_id;
 
         const [pi, ci, ii, pri] = await Promise.all([
-          personDbId  ? buildNameIndex(personDbId, token)              : Promise.resolve({}),
-          clientDbId  ? buildNameIndex(clientDbId, token)              : Promise.resolve({}),
-          itemDbId    ? buildItemIndexWithProjects(itemDbId, token)    : Promise.resolve([]),
-          projectsDbId ? buildNameIndex(projectsDbId, token)          : Promise.resolve({}),
+          personDbId   ? buildNameIndex(personDbId, token)           : Promise.resolve({}),
+          clientDbId   ? buildNameIndex(clientDbId, token)           : Promise.resolve({}),
+          itemDbId     ? buildItemIndexWithProjects(itemDbId, token) : Promise.resolve([]),
+          projectsDbId ? buildNameIndex(projectsDbId, token)        : Promise.resolve({}),
         ]);
         personIdx  = pi;
         clientIdx  = ci;
         itemIdx    = ii;
         projectIdx = pri;
         notionAvailable = true;
+        // Store in module-level cache
+        _notionCache = { personIdx, clientIdx, itemIdx, projectIdx };
+        _notionCacheTs = Date.now();
       }
     } catch {
       // Notion unavailable — still return structural validation
@@ -271,51 +291,43 @@ function notionHeaders(token) {
   };
 }
 
+// Single-page fetches (page_size:100) — no pagination loop needed for these
+// small databases. Eliminates extra Notion API round-trips per call.
 async function buildNameIndex(dbId, token) {
   const index = {};
-  let cursor;
-  do {
-    const payload = { page_size: 100 };
-    if (cursor) payload.start_cursor = cursor;
-    const res = await fetch('https://api.notion.com/v1/databases/' + dbId + '/query', {
-      method: 'POST', headers: notionHeaders(token), body: JSON.stringify(payload),
-    });
-    if (!res.ok) break;
-    const data = await res.json();
-    for (const page of (data.results || [])) {
-      const titleProp = Object.values(page.properties || {}).find(p => p.type === 'title');
-      const name = titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text;
-      if (name) index[name.trim()] = page.id;
-    }
-    cursor = data.has_more ? data.next_cursor : null;
-  } while (cursor);
+  const res = await fetch('https://api.notion.com/v1/databases/' + dbId + '/query', {
+    method: 'POST', headers: notionHeaders(token),
+    body: JSON.stringify({ page_size: 100 }),
+  });
+  if (!res.ok) return index;
+  const data = await res.json();
+  for (const page of (data.results || [])) {
+    const titleProp = Object.values(page.properties || {}).find(p => p.type === 'title');
+    const name = titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text;
+    if (name) index[name.trim()] = page.id;
+  }
   return index;
 }
 
 async function buildItemIndexWithProjects(dbId, token) {
   const items = [];
-  let cursor;
-  do {
-    const payload = { page_size: 100 };
-    if (cursor) payload.start_cursor = cursor;
-    const res = await fetch('https://api.notion.com/v1/databases/' + dbId + '/query', {
-      method: 'POST', headers: notionHeaders(token), body: JSON.stringify(payload),
-    });
-    if (!res.ok) break;
-    const data = await res.json();
-    for (const page of (data.results || [])) {
-      const titleProp = Object.values(page.properties || {}).find(p => p.type === 'title');
-      const name = titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text;
-      if (name) {
-        const projectIds = [];
-        Object.values(page.properties || {}).forEach(prop => {
-          if (prop.type === 'relation') (prop.relation || []).forEach(r => projectIds.push(r.id));
-        });
-        items.push({ name: name.trim(), id: page.id, projectIds });
-      }
+  const res = await fetch('https://api.notion.com/v1/databases/' + dbId + '/query', {
+    method: 'POST', headers: notionHeaders(token),
+    body: JSON.stringify({ page_size: 100 }),
+  });
+  if (!res.ok) return items;
+  const data = await res.json();
+  for (const page of (data.results || [])) {
+    const titleProp = Object.values(page.properties || {}).find(p => p.type === 'title');
+    const name = titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text;
+    if (name) {
+      const projectIds = [];
+      Object.values(page.properties || {}).forEach(prop => {
+        if (prop.type === 'relation') (prop.relation || []).forEach(r => projectIds.push(r.id));
+      });
+      items.push({ name: name.trim(), id: page.id, projectIds });
     }
-    cursor = data.has_more ? data.next_cursor : null;
-  } while (cursor);
+  }
   return items;
 }
 

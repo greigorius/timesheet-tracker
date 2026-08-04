@@ -841,9 +841,16 @@ function renderFileList(raw){
   if(addAllBtn) addAllBtn.style.display=scannedFiles.length?'':'none';
   renderFileListUI();
   document.getElementById('step1num').className='step-num done';
-  // Kick off per-file validation if a validate webhook is configured
+  // Kick off per-file validation staggered 2s apart — avoids hammering
+  // Notion API simultaneously across all files, which causes rate-limit timeouts
   if(cfg.validateUrl){
-    scannedFiles.forEach(f=>triggerValidationForFile(f));
+    let delay=0;
+    scannedFiles.forEach(f=>{
+      if(!importedFileNames.has(f.name)){
+        setTimeout(()=>triggerValidationForFile(f), delay);
+        delay+=2000;
+      }
+    });
   }
 }
 
@@ -958,9 +965,12 @@ function renderFileListUI(){
       if(vr.notion_available===false&&issueLines.length===0){
         issueLines.push(`<div class="val-issue vi-warn">Notion unavailable — only structural checks ran</div>`);
       }
-      if(issueLines.length>0){
-        detail=`<div class="val-detail" id="vd-${i}">${issueLines.join('')}</div>`;
+      // Generic error fallback (HTTP error, network error, etc.)
+      if(issueLines.length===0){
+        const msg=vr.error?esc(vr.error):'Validation error — check browser console';
+        issueLines.push(`<div class="val-issue vi-err">${msg}</div>`);
       }
+      detail=`<div class="val-detail" id="vd-${i}">${issueLines.join('')}</div>`;
     }
 
     return `<div class="file-row${inQueue?' in-queue':''}" onclick="${inQueue?'':'addToQueue(scannedFiles['+i+'])'}">
