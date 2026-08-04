@@ -6,10 +6,9 @@
 [build.environment]
   NODE_VERSION = "20"
 
-# Raise function timeout to the Netlify maximum (26s).
-# The notion-proxy needs this on cold starts when it must fetch
-# 4+ Notion relation DBs to build the title resolution cache.
-[functions]
+# Raise function timeout to the Netlify maximum (26s) for all functions.
+# notion-proxy needs this on cold starts (fetches 4+ Notion relation DBs).
+[functions."*"]
   timeout_seconds = 26
 
 # Reference page — serve its own HTML (must come BEFORE SPA fallback)
