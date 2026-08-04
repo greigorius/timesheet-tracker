@@ -982,17 +982,22 @@ async function startImport(){
         toast(qItem.name+': import blocked','e');
       } else if(!res.ok){
         qItem.status='error';
-        qItem.detail='HTTP '+res.status;
+        qItem.detail='HTTP '+res.status+(data.error?' — '+data.error:'');
         toast(qItem.name+': HTTP '+res.status,'e');
-      } else if(data.flagged_count>0){
+      } else if(data.status==='flagged'||Number(data.flagged_count)>0){
         qItem.status='flagged';
-        qItem.detail=data.flagged_count+' row(s) flagged — file stays in Inbox for correction';
+        qItem.detail=Number(data.flagged_count)+' row(s) flagged — file stays in Inbox for correction';
         toast(qItem.name+': '+data.flagged_count+' row(s) flagged','w');
-      } else {
+      } else if(data.status==='imported'){
         qItem.status='imported';
         qItem.detail='Imported successfully';
         importedFileNames.add(qItem.name); // remove from Col 1 file list
         toast(qItem.name+': imported ✓','s');
+      } else {
+        // 200 OK but no recognised success status — Make-level error or misconfigured scenario
+        qItem.status='error';
+        qItem.detail=data.message||data.error||(data.status?'Make returned: '+data.status:'No status in response — check Make scenario logs');
+        toast(qItem.name+': unexpected response','e');
       }
     }catch(e){
       qItem.status='error';

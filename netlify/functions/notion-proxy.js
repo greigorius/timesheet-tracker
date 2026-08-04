@@ -588,8 +588,9 @@ async function resolveRelationTitles(pages, token, sourceDbId) {
       }
     } catch { /* fall through — titleMap stays empty */ }
 
-    // 2. For each related DB, fetch all pages and build id→name map.
-    for (const dbId of relDbIds) {
+    // 2. Fetch all related DBs in parallel — avoids sequential blocking that causes 504s
+    //    on cold Netlify instances when there are 4+ relation DBs (Person/Client/Item/Projects).
+    await Promise.all(relDbIds.map(async (dbId) => {
       let cursor;
       do {
         try {
@@ -610,7 +611,7 @@ async function resolveRelationTitles(pages, token, sourceDbId) {
           cursor = data.has_more ? data.next_cursor : null;
         } catch { break; }
       } while (cursor);
-    }
+    }));
 
     // Store in cache even if empty, so we don't hammer on errors
     _titleCache[sourceDbId] = { map: titleMap, time: now };
