@@ -65,7 +65,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 
 /* file list */
 .file-list{display:flex;flex-direction:column;gap:4px;min-height:60px}
-.file-row{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:3px;background:var(--surface2);border:1px solid var(--border);transition:border-color .15s}
+.file-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:7px 10px;border-radius:3px;background:var(--surface2);border:1px solid var(--border);transition:border-color .15s}
 .file-row:hover{border-color:var(--border2)}
 .file-row.selected{border-color:var(--blue-dim);background:rgba(59,130,246,.06)}
 .file-row input[type=checkbox]{accent-color:var(--blue);width:13px;height:13px;cursor:pointer;flex-shrink:0}
@@ -82,6 +82,14 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 .compat-detail.show{display:block}
 .compat-detail .mapped{color:var(--green);font-family:var(--mono);font-size:10px}
 .compat-detail .missing{color:var(--amber);font-family:var(--mono);font-size:10px}
+
+/* validation detail panel (expands inside .file-row with flex-basis:100%) */
+.val-detail{display:none;flex-basis:100%;padding:5px 10px 5px 0;font-family:var(--mono);font-size:10px;line-height:1.7;border-top:1px solid var(--border);margin-top:3px}
+.val-detail.show{display:block}
+.val-issue{padding:1px 0}
+.val-issue.vi-err{color:var(--red);opacity:.9}
+.val-issue.vi-warn{color:var(--amber);opacity:.85}
+.val-issue::before{content:'↳ ';opacity:.5}
 
 /* select-all row */
 .sel-all-row{display:flex;align-items:center;justify-content:space-between;padding:5px 10px;border-radius:3px;gap:10px}
@@ -570,6 +578,11 @@ td.dim{color:var(--muted)}
       <input class="fi" type="url" id="cfgWrite" placeholder="https://hook.eu1.make.com/write/...">
     </div>
     <div class="fg">
+      <div class="fl">Make.com — Pre-validate Webhook</div>
+      <div class="fd">Optional. Scenario C webhook URL — validates files at scan time (checks blanks, date format, and Notion lookups) before import.</div>
+      <input class="fi" type="url" id="cfgValidate" placeholder="https://hook.eu1.make.com/validate/...">
+    </div>
+    <div class="fg">
       <div class="fl">API Proxy URL</div>
       <div class="fd">Server-side proxy for Notion reads. Defaults to the built-in Netlify function — only change if self-hosting elsewhere.</div>
       <input class="fi" type="url" id="cfgProxy" placeholder="/.netlify/functions/notion-proxy">
@@ -589,7 +602,7 @@ td.dim{color:var(--muted)}
 // ─────────────────────────────────────────────────────────
 const DEFAULT_PROXY = '/.netlify/functions/notion-proxy';
 let cfg = {
-  scanUrl:'', writeUrl:'',
+  scanUrl:'', writeUrl:'', validateUrl:'',
   proxyUrl: DEFAULT_PROXY
 };
 function loadCfg(){
@@ -599,9 +612,10 @@ function loadCfg(){
   delete cfg.notionToken;
   delete cfg.dbId;
   if(!cfg.proxyUrl) cfg.proxyUrl = DEFAULT_PROXY;
-  document.getElementById('cfgScan').value   = cfg.scanUrl;
-  document.getElementById('cfgWrite').value  = cfg.writeUrl;
-  document.getElementById('cfgProxy').value  = cfg.proxyUrl;
+  document.getElementById('cfgScan').value      = cfg.scanUrl;
+  document.getElementById('cfgWrite').value     = cfg.writeUrl;
+  document.getElementById('cfgValidate').value  = cfg.validateUrl || '';
+  document.getElementById('cfgProxy').value     = cfg.proxyUrl;
   updateConnState();
   applyColWidths();
 }
@@ -659,9 +673,10 @@ function applyColWidths(){
   });
 })();
 function saveSettings(){
-  cfg.scanUrl  = document.getElementById('cfgScan').value.trim();
-  cfg.writeUrl = document.getElementById('cfgWrite').value.trim();
-  cfg.proxyUrl = document.getElementById('cfgProxy').value.trim() || DEFAULT_PROXY;
+  cfg.scanUrl     = document.getElementById('cfgScan').value.trim();
+  cfg.writeUrl    = document.getElementById('cfgWrite').value.trim();
+  cfg.validateUrl = document.getElementById('cfgValidate').value.trim();
+  cfg.proxyUrl    = document.getElementById('cfgProxy').value.trim() || DEFAULT_PROXY;
   localStorage.setItem('adl-ts-cfg',JSON.stringify(cfg));
   updateConnState(); closeSettings();
   toast('Settings saved','s');
@@ -814,16 +829,51 @@ async function scanInbox(){
 
 let scannedFiles=[];
 let importedFileNames=new Set(); // files successfully imported this session — hidden from Col 1
+let validationResults={}; // filename → {state:'none'|'checking'|'ok'|'warn'|'err', ...data}
 
 function renderFileList(raw){
   // Normalise whatever Make sends: unwrap {files:[]} / {items:[]}, drop null/nameless entries
   const arr=Array.isArray(raw)?raw:(raw&&Array.isArray(raw.files)?raw.files:Array.isArray(raw.items)?raw.items:[]);
   scannedFiles=arr.filter(f=>f&&f.name);
   importedFileNames=new Set(); // reset on rescan — Dropbox list is fresh
+  validationResults={};        // reset validation on rescan
   const addAllBtn=document.getElementById('addAllBtn');
   if(addAllBtn) addAllBtn.style.display=scannedFiles.length?'':'none';
   renderFileListUI();
   document.getElementById('step1num').className='step-num done';
+  // Kick off per-file validation if a validate webhook is configured
+  if(cfg.validateUrl){
+    scannedFiles.forEach(f=>triggerValidationForFile(f));
+  }
+}
+
+async function triggerValidationForFile(f){
+  if(!cfg.validateUrl||importedFileNames.has(f.name)) return;
+  validationResults[f.name]={state:'checking'};
+  renderFileListUI();
+  try{
+    const res=await fetch(cfg.validateUrl,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({filename:f.name})
+    });
+    if(res.ok){
+      const data=await res.json();
+      const personErr=data.issues&&data.issues.person_not_found;
+      const state=personErr?'err':(data.issue_count>0?'warn':'ok');
+      validationResults[f.name]={state,...data};
+    } else {
+      validationResults[f.name]={state:'err',issue_count:1,error:'HTTP '+res.status};
+    }
+  }catch(e){
+    validationResults[f.name]={state:'err',issue_count:1,error:e.message};
+  }
+  renderFileListUI();
+}
+
+function toggleValDetail(idx){
+  const el=document.getElementById('vd-'+idx);
+  if(el) el.classList.toggle('show');
 }
 
 function renderFileListUI(){
@@ -835,19 +885,90 @@ function renderFileListUI(){
     return;
   }
   list.innerHTML=scannedFiles.map((f,i)=>{
-    if(importedFileNames.has(f.name)) return ''; // remove from list once successfully imported
-    const unverified=f.headers==null;
-    const map=unverified?{mapped:[],missing:[]}:mapHeaders(f.headers||[]);
-    const ok=!unverified&&map.missing.length===0;
-    const partial=!unverified&&map.missing.length<=2&&map.mapped.length>=5;
-    const badgeClass=unverified?'warn':ok?'ok':partial?'warn':'err';
-    const badgeText=unverified?'? Unverified':ok?'✓ Compatible':partial?'⚠ Partial':'✗ Incompatible';
+    if(importedFileNames.has(f.name)) return '';
     const inQueue=!!importQueue.find(q=>q.name===f.name);
+
+    // ── Validation badge ────────────────────────────────────────────────────
+    const vr=validationResults[f.name];
+    let badge;
+    if(!cfg.validateUrl){
+      // No validate URL: fall back to old header-compat badge
+      const unverified=f.headers==null;
+      const map=unverified?{mapped:[],missing:[]}:mapHeaders(f.headers||[]);
+      const ok=!unverified&&map.missing.length===0;
+      const partial=!unverified&&map.missing.length<=2&&map.mapped.length>=5;
+      const bc=unverified?'warn':ok?'ok':partial?'warn':'err';
+      const bt=unverified?'? Unverified':ok?'✓ Compatible':partial?'⚠ Partial':'✗ Incompatible';
+      badge=`<span class="compat-badge ${bc}">${bt}</span>`;
+    } else if(!vr){
+      badge=`<span class="compat-badge warn">? Unverified</span>`;
+    } else if(vr.state==='checking'){
+      badge=`<span class="compat-badge checking"><span class="spin" style="width:8px;height:8px;border-width:1px;margin-right:3px"></span>Checking</span>`;
+    } else if(vr.state==='ok'){
+      const notionNote=vr.notion_available===false?' (structure only)':'';
+      badge=`<span class="compat-badge ok" title="No issues found${notionNote}">✓ Valid${notionNote}</span>`;
+    } else if(vr.state==='warn'||vr.state==='err'){
+      const n=vr.issue_count||1;
+      const cls=vr.state==='err'?'err':'warn';
+      const icon=vr.state==='err'?'✗':'⚠';
+      badge=`<span class="compat-badge ${cls}" style="cursor:pointer" onclick="event.stopPropagation();toggleValDetail(${i})" title="Click to see issues">${icon} ${n} issue${n===1?'':'s'} ▾</span>`;
+    } else {
+      badge=`<span class="compat-badge err">✗ Error</span>`;
+    }
+
+    // ── Validation detail panel ─────────────────────────────────────────────
+    let detail='';
+    if(vr&&(vr.state==='warn'||vr.state==='err')){
+      const issueLines=[];
+      // Filename issues
+      if(vr.filename_issues&&vr.filename_issues.length>0){
+        vr.filename_issues.forEach(msg=>issueLines.push(`<div class="val-issue vi-warn">Filename: ${esc(msg)}</div>`));
+      }
+      // Person not found (hard error)
+      if(vr.issues&&vr.issues.person_not_found){
+        issueLines.push(`<div class="val-issue vi-err">Person "${esc(vr.person||'')}" not in Notion People — add them first</div>`);
+      }
+      // Per-row issues (deduplicated by type)
+      if(Array.isArray(vr.rows)){
+        const ISSUE_LABEL={
+          blank_client:'blank Client (col D)',
+          blank_project:'blank Project (col E)',
+          blank_item:'blank Item (col F)',
+          bad_date:'date not in YYYY-MM-DD format (col C)',
+          unresolved_client:'Client not found in Notion',
+          unresolved_item:'Item not found in Notion',
+        };
+        // Group rows by issue type for concise display
+        const byType={};
+        vr.rows.forEach(r=>{
+          (r.issues||[]).forEach(iss=>{
+            if(!byType[iss]) byType[iss]=[];
+            byType[iss].push(r.row_num);
+          });
+        });
+        Object.entries(byType).forEach(([iss,rowNums])=>{
+          const label=ISSUE_LABEL[iss]||iss;
+          const rows=rowNums.length===1?`row ${rowNums[0]}`:
+                     rowNums.length<=4?`rows ${rowNums.join(', ')}`:
+                     `rows ${rowNums[0]}–${rowNums[rowNums.length-1]} (${rowNums.length})`;
+          issueLines.push(`<div class="val-issue vi-warn">${esc(label)} — ${rows}</div>`);
+        });
+      }
+      // Notion unavailable note
+      if(vr.notion_available===false&&issueLines.length===0){
+        issueLines.push(`<div class="val-issue vi-warn">Notion unavailable — only structural checks ran</div>`);
+      }
+      if(issueLines.length>0){
+        detail=`<div class="val-detail" id="vd-${i}">${issueLines.join('')}</div>`;
+      }
+    }
+
     return `<div class="file-row${inQueue?' in-queue':''}" onclick="${inQueue?'':'addToQueue(scannedFiles['+i+'])'}">
       <span class="file-name" title="${esc(f.name)}">${esc(f.name)}</span>
       <span class="file-meta">${esc(f.size||'')}${f.size&&f.modified?' · ':''}${esc(f.modified||'')}</span>
-      <span class="compat-badge ${badgeClass}">${badgeText}</span>
+      ${badge}
       <button class="file-add-btn${inQueue?' added':''}" onclick="event.stopPropagation();${inQueue?'':'addToQueue(scannedFiles['+i+'])'}" ${inQueue?'disabled':''}>${inQueue?'Queued':'+ Queue'}</button>
+      ${detail}
     </div>`;
   }).join('');
 }
