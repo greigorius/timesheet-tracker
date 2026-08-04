@@ -92,7 +92,17 @@ exports.handler = async (event) => {
 // ---------------------------------------------------------------------------
 
 async function handleValidateRelations(body, token) {
-  const { rows } = body;
+  // Accept rows_b64 (base64-encoded JSON) or plain rows array.
+  // rows_b64 is preferred — it survives Make's template substitution without
+  // risk of JSON corruption or truncation.
+  let rows = body.rows;
+  if (body.rows_b64) {
+    try {
+      rows = JSON.parse(Buffer.from(body.rows_b64, 'base64').toString('utf8'));
+    } catch {
+      return respond(400, { error: 'Invalid rows_b64 — could not decode' });
+    }
+  }
   if (!Array.isArray(rows) || rows.length === 0) {
     return respond(400, { error: 'rows must be a non-empty array' });
   }

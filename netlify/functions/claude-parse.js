@@ -149,7 +149,11 @@ exports.handler = async (event) => {
       ...row,
     }));
 
-    return respond(200, { rows, rows_json: JSON.stringify(rows), count: rows.length });
+    const rows_json = JSON.stringify(rows);
+    // rows_b64: base64-encode the JSON so Make's template engine can't corrupt it
+    // (direct JSON embedding in Make templates can mangle escaping or truncate large payloads)
+    const rows_b64 = Buffer.from(rows_json).toString('base64');
+    return respond(200, { rows, rows_json, rows_b64, count: rows.length });
   } catch (err) {
     return respond(502, { error: 'Failed to reach Anthropic API', detail: err.message });
   }
