@@ -104,18 +104,7 @@ async function handleValidateRelations(body, token) {
     }
   }
   if (!Array.isArray(rows) || rows.length === 0) {
-    return respond(400, {
-      error: 'rows must be a non-empty array',
-      _debug: {
-        body_keys: Object.keys(body),
-        has_rows_b64: 'rows_b64' in body,
-        rows_b64_type: typeof body.rows_b64,
-        rows_b64_length: body.rows_b64 ? String(body.rows_b64).length : 0,
-        rows_b64_preview: body.rows_b64 ? String(body.rows_b64).slice(0, 40) : null,
-        has_rows_json: 'rows_json' in body,
-        rows_type: typeof body.rows,
-      }
-    });
+    return respond(400, { error: 'rows must be a non-empty array' });
   }
 
   const timesheetsDbId = process.env.NOTION_TIMESHEETS_DB;
@@ -252,12 +241,6 @@ async function handleValidateRelations(body, token) {
     error_count:     errorRows.length,
     flagged_count:   flaggedCount,
     valid_rows_json: JSON.stringify(validRows),
-    _debug: {
-      person_index_size:  Object.keys(personIdx).length,
-      client_index_size:  Object.keys(clientIdx).length,
-      item_index_size:    itemIdx.length,
-      project_index_size: Object.keys(projectIdx).length,
-    },
   });
 }
 

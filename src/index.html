@@ -378,6 +378,54 @@ td.dim{color:var(--muted)}
 .file-row.in-queue:hover{border-color:var(--border)}
 .reval-btn{background:none;border:1px solid var(--border2);color:var(--dim);font-size:10px;padding:1px 6px;border-radius:2px;cursor:pointer;flex-shrink:0;line-height:1.6;transition:color .15s,border-color .15s}
 .reval-btn:hover{color:var(--text);border-color:var(--blue)}
+
+/* ── CHART FILTER BAR ── */
+.cv-fbar{display:flex;gap:8px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--border);background:var(--surface2);flex-wrap:wrap}
+
+/* ── EXPORT MODAL ── */
+.exp-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:300}
+.exp-overlay.open{display:block}
+.exp-modal{
+  position:fixed;top:50%;left:50%;
+  transform:translate(-50%,-50%) scale(.94);
+  opacity:0;pointer-events:none;
+  width:500px;max-width:94vw;
+  background:var(--surface);border:1px solid var(--border2);border-radius:6px;
+  z-index:301;
+  transition:transform .22s cubic-bezier(.22,1,.36,1),opacity .22s;
+}
+.exp-modal.open{transform:translate(-50%,-50%) scale(1);opacity:1;pointer-events:auto}
+.exp-hdr{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--border)}
+.exp-title{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--text);text-transform:uppercase;letter-spacing:.12em}
+.exp-body{padding:16px;display:flex;flex-direction:column;gap:14px}
+.exp-preview{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:12px 14px}
+.exp-prow{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:5px}
+.exp-prow:last-child{margin-bottom:0}
+.exp-prow strong{color:var(--text)}
+.exp-formats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.exp-fmt-lbl{cursor:pointer}
+.exp-fmt-lbl input{display:none}
+.exp-fmt-card{border:1px solid var(--border);border-radius:4px;padding:14px 12px;text-align:center;transition:border-color .15s,background .15s}
+.exp-fmt-lbl input:checked+.exp-fmt-card{border-color:var(--blue);background:var(--blue-dim)}
+.exp-fmt-card:hover{border-color:var(--border2)}
+.exp-fmt-icon{font-size:22px;margin-bottom:8px;line-height:1}
+.exp-fmt-name{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text);margin-bottom:4px}
+.exp-fmt-desc{font-size:10px;color:var(--muted);line-height:1.5}
+.exp-dl-btn{width:100%;background:var(--blue);color:#fff;border:none;border-radius:4px;padding:10px;font-family:var(--mono);font-size:11px;font-weight:600;cursor:pointer;transition:background .15s;letter-spacing:.05em;text-transform:uppercase}
+.exp-dl-btn:hover{background:var(--blue-bright)}
+.exp-dl-btn:active{background:var(--blue-dim);color:var(--blue-bright)}
+
+/* period selector */
+.exp-period-sel{display:flex;flex-direction:column;gap:7px}
+.exp-radio-lbl{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;color:var(--muted);cursor:pointer;user-select:none}
+.exp-radio-lbl input[type=radio]{accent-color:var(--blue);cursor:pointer;flex-shrink:0}
+.exp-radio-lbl input:checked~span{color:var(--text)}
+.exp-period-chip{color:var(--blue-bright);font-family:var(--mono);font-size:11px}
+.exp-date-range{display:flex;align-items:center;gap:8px;padding-left:20px;margin-top:2px}
+.exp-date-range.hidden{display:none}
+.exp-date-input{background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:4px 8px;border-radius:3px;outline:none;cursor:pointer;color-scheme:dark}
+.exp-date-input:focus{border-color:var(--blue)}
+.exp-date-sep{font-family:var(--mono);font-size:11px;color:var(--dim)}
 </style>
 </head>
 <body>
@@ -471,8 +519,9 @@ td.dim{color:var(--muted)}
         <button class="today-btn" onclick="goToday()">Today</button>
         <div class="vsep"></div>
         <div class="view-seg">
-          <button onclick="setView('week')"  id="vWeek"  class="active">Week</button>
-          <button onclick="setView('month')" id="vMonth">Month</button>
+          <button onclick="setView('week')"   id="vWeek"  class="active">Week</button>
+          <button onclick="setView('month')"  id="vMonth">Month</button>
+          <button onclick="setView('custom')" id="vCustom">Custom</button>
         </div>
         <div class="vsep"></div>
         <div class="view-seg">
@@ -483,6 +532,21 @@ td.dim{color:var(--muted)}
           <option value="">All people</option>
         </select>
       </div>
+    </div>
+    <div class="cv-fbar">
+      <div class="exp-date-range hidden" id="cvCustomRange">
+        <input type="date" class="exp-date-input" id="cvDateFrom" onchange="onCustomDateChange()">
+        <span class="exp-date-sep">→</span>
+        <input type="date" class="exp-date-input" id="cvDateTo" onchange="onCustomDateChange()">
+      </div>
+      <select class="fsel" id="chartClientFilter" onchange="onChartFilterChange()">
+        <option value="">All clients</option>
+      </select>
+      <select class="fsel" id="chartProjectFilter" onchange="onChartFilterChange()">
+        <option value="">All projects</option>
+      </select>
+      <div class="fsep"></div>
+      <button class="pill-btn primary" onclick="openExportModal()">↓ Export</button>
     </div>
     <div id="chartViewBody" class="chart-view-body"></div>
     <div class="chart-legend" id="chartLegend"></div>
@@ -563,6 +627,37 @@ td.dim{color:var(--muted)}
   </div>
 
 </main>
+
+<!-- EXPORT MODAL -->
+<div class="exp-overlay" id="expOverlay" onclick="closeExportModal()"></div>
+<div class="exp-modal" id="expModal">
+  <div class="exp-hdr">
+    <div class="exp-title">Export Report</div>
+    <button class="drw-x" onclick="closeExportModal()">×</button>
+  </div>
+  <div class="exp-body">
+    <div class="exp-preview" id="expPreview"></div>
+    <div class="exp-formats">
+      <label class="exp-fmt-lbl">
+        <input type="radio" name="expFmt" value="pdf" checked>
+        <div class="exp-fmt-card">
+          <div class="exp-fmt-icon">📄</div>
+          <div class="exp-fmt-name">PDF Report</div>
+          <div class="exp-fmt-desc">Clockify-style summary<br>Project → Item → Person</div>
+        </div>
+      </label>
+      <label class="exp-fmt-lbl">
+        <input type="radio" name="expFmt" value="xlsx">
+        <div class="exp-fmt-card">
+          <div class="exp-fmt-icon">📊</div>
+          <div class="exp-fmt-name">Excel Log</div>
+          <div class="exp-fmt-desc">EIT log format<br>One row per time entry</div>
+        </div>
+      </label>
+    </div>
+    <button class="exp-dl-btn" onclick="doExport()">Download</button>
+  </div>
+</div>
 
 <!-- SETTINGS -->
 <div class="ov" id="ov" onclick="closeSettings()"></div>
@@ -1379,13 +1474,18 @@ function updateStats(){
 }
 function populateFilters(){
   const projects=[...new Set(allEntries.map(e=>e.project).filter(Boolean))].sort();
-  const people=[...new Set(allEntries.map(e=>e.person))].sort();
+  const clients =[...new Set(allEntries.map(e=>e.client).filter(Boolean))].sort();
+  const people  =[...new Set(allEntries.map(e=>e.person))].sort();
   const fProj=document.getElementById('fProject');
   const fPers=document.getElementById('fPerson');
   const vPers=document.getElementById('personFilter');
+  const cCli =document.getElementById('chartClientFilter');
+  const cProj=document.getElementById('chartProjectFilter');
   fProj.innerHTML='<option value="">All projects</option>'+projects.map(p=>'<option>'+esc(p)+'</option>').join('');
   fPers.innerHTML='<option value="">All people</option>'+people.map(p=>'<option>'+esc(p)+'</option>').join('');
   vPers.innerHTML='<option value="">All people</option>'+people.map(p=>'<option>'+esc(p)+'</option>').join('');
+  if(cCli) cCli.innerHTML='<option value="">All clients</option>'+clients.map(c=>'<option>'+esc(c)+'</option>').join('');
+  if(cProj) cProj.innerHTML='<option value="">All projects</option>'+projects.map(p=>'<option>'+esc(p)+'</option>').join('');
 }
 
 // ─────────────────────────────────────────────────────────
@@ -1420,11 +1520,14 @@ function initProjColors()   { assignColors(); }
 
 function setView(mode) {
   viewMode = mode;
-  ['Week','Month'].forEach(v => {
+  ['Week','Month','Custom'].forEach(v => {
     const el = document.getElementById('v'+v);
     if (el) el.classList.toggle('active', v.toLowerCase() === mode);
   });
-  viewOffset = 0; renderView(); updateNavBtns();
+  const cvRange = document.getElementById('cvCustomRange');
+  if (cvRange) cvRange.classList.toggle('hidden', mode !== 'custom');
+  if (mode !== 'custom') viewOffset = 0;
+  renderView(); updateNavBtns();
 }
 function setAxis(mode) {
   axisMode = mode;
@@ -1433,6 +1536,7 @@ function setAxis(mode) {
   renderView();
 }
 function navigate(dir) {
+  if (viewMode === 'custom') return;
   const today = new Date();
   if (viewMode === 'week') {
     const newOff = viewOffset + dir;
@@ -1446,11 +1550,16 @@ function navigate(dir) {
   }
   renderView(); updateNavBtns();
 }
-function goToday()   { viewOffset = 0; renderView(); updateNavBtns(); }
-function updateNavBtns() {
-  document.getElementById('nextBtn').disabled = viewOffset >= 0;
-  document.getElementById('prevBtn').disabled = false;
+function goToday() {
+  if (viewMode === 'custom') setView('week');
+  viewOffset = 0; renderView(); updateNavBtns();
 }
+function updateNavBtns() {
+  const custom = viewMode === 'custom';
+  document.getElementById('nextBtn').disabled = custom || viewOffset >= 0;
+  document.getElementById('prevBtn').disabled = custom;
+}
+function onCustomDateChange() { renderView(); }
 function getWeekStart(base, offset) {
   const d = new Date(base);
   const diff = d.getDay() === 0 ? -6 : 1 - d.getDay();
@@ -1463,8 +1572,10 @@ function getWeekStart(base, offset) {
 // RENDER VIEW
 // ─────────────────────────────────────────────────────────
 function renderView() {
-  const today   = new Date(); today.setHours(0,0,0,0);
-  const personF = document.getElementById('personFilter').value;
+  const today    = new Date(); today.setHours(0,0,0,0);
+  const personF  = document.getElementById('personFilter').value;
+  const clientF  = document.getElementById('chartClientFilter')?.value || '';
+  const projectF = document.getElementById('chartProjectFilter')?.value || '';
 
   let dateSet = new Set();
   let periodLabel = '';
@@ -1479,7 +1590,7 @@ function renderView() {
       const dt = new Date(ws); dt.setDate(ws.getDate() + d);
       dateSet.add(fmtDate(dt));
     }
-  } else {
+  } else if (viewMode === 'month') {
     const y = today.getFullYear();
     const m = today.getMonth() + viewOffset;
     const d1 = new Date(y, m, 1);
@@ -1488,11 +1599,29 @@ function renderView() {
     for (let d = 1; d <= dN.getDate(); d++) {
       dateSet.add(fmtDate(new Date(y, m, d)));
     }
+  } else {
+    // custom date range
+    const fromVal = document.getElementById('cvDateFrom')?.value;
+    const toVal   = document.getElementById('cvDateTo')?.value;
+    if (fromVal && toVal) {
+      const from = new Date(fromVal + 'T00:00:00');
+      const to   = new Date(toVal   + 'T00:00:00');
+      if (from <= to) {
+        let cur = new Date(from);
+        while (cur <= to) { dateSet.add(fmtDate(cur)); cur.setDate(cur.getDate() + 1); }
+        periodLabel = from.toLocaleDateString('en-GB',{day:'numeric',month:'short'})
+          + ' \u2013 '
+          + to.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+      }
+    }
   }
   document.getElementById('periodLabel').textContent = periodLabel;
 
   const entries = allEntries.filter(e =>
-    dateSet.has(e.date) && (!personF || e.person === personF)
+    dateSet.has(e.date)
+    && (!personF  || e.person  === personF)
+    && (!clientF  || e.client  === clientF)
+    && (!projectF || e.project === projectF)
   );
 
   renderBarChart(entries);
@@ -1856,6 +1985,252 @@ function bdToggleProject(key){
   if(bdExpanded.projects.has(key)) bdExpanded.projects.delete(key);
   else bdExpanded.projects.add(key);
   renderBreakdown();
+}
+
+// ─────────────────────────────────────────────────────────
+// CHART FILTER CASCADE
+// ─────────────────────────────────────────────────────────
+function onChartFilterChange() {
+  const clientF = document.getElementById('chartClientFilter').value;
+  const projSel = document.getElementById('chartProjectFilter');
+  const curProj = projSel.value;
+
+  // Rebuild project list to match selected client
+  const projects = [...new Set(
+    allEntries
+      .filter(e => !clientF || e.client === clientF)
+      .map(e => e.project).filter(Boolean)
+  )].sort();
+
+  projSel.innerHTML = '<option value="">All projects</option>'
+    + projects.map(p => `<option${p===curProj?' selected':''}>${esc(p)}</option>`).join('');
+
+  renderView();
+}
+
+// ─────────────────────────────────────────────────────────
+// EXPORT — helper to get current chart entries
+// ─────────────────────────────────────────────────────────
+let _exportEntries = [];
+
+function _getCurrentChartEntries() {
+  const today    = new Date(); today.setHours(0,0,0,0);
+  const personF  = document.getElementById('personFilter').value;
+  const clientF  = document.getElementById('chartClientFilter')?.value || '';
+  const projectF = document.getElementById('chartProjectFilter')?.value || '';
+
+  let dateSet = new Set();
+  if (viewMode === 'week') {
+    const ws = getWeekStart(today, viewOffset);
+    for (let d = 0; d < 7; d++) {
+      const dt = new Date(ws); dt.setDate(ws.getDate() + d);
+      dateSet.add(fmtDate(dt));
+    }
+  } else if (viewMode === 'month') {
+    const y = today.getFullYear();
+    const m = today.getMonth() + viewOffset;
+    const dN = new Date(y, m+1, 0);
+    for (let d = 1; d <= dN.getDate(); d++) dateSet.add(fmtDate(new Date(y, m, d)));
+  } else {
+    const fromVal = document.getElementById('cvDateFrom')?.value;
+    const toVal   = document.getElementById('cvDateTo')?.value;
+    if (fromVal && toVal) {
+      const from = new Date(fromVal + 'T00:00:00');
+      const to   = new Date(toVal   + 'T00:00:00');
+      let cur = new Date(from);
+      while (cur <= to) { dateSet.add(fmtDate(cur)); cur.setDate(cur.getDate() + 1); }
+    }
+  }
+
+  return allEntries.filter(e =>
+    dateSet.has(e.date)
+    && (!personF  || e.person  === personF)
+    && (!clientF  || e.client  === clientF)
+    && (!projectF || e.project === projectF)
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// EXPORT MODAL
+// ─────────────────────────────────────────────────────────
+let _exportPeriodLabel = '';
+
+
+function openExportModal() {
+  _exportEntries      = _getCurrentChartEntries();
+  _exportPeriodLabel  = document.getElementById('periodLabel').textContent;
+
+  const totalHours     = _exportEntries.reduce((s, e) => s + (e.hours || 0), 0);
+  const uniquePeople   = new Set(_exportEntries.map(e => e.person)).size;
+  const uniqueProjects = new Set(_exportEntries.map(e => e.project).filter(Boolean)).size;
+
+  const personF  = document.getElementById('personFilter').value;
+  const clientF  = document.getElementById('chartClientFilter')?.value || '';
+  const projectF = document.getElementById('chartProjectFilter')?.value || '';
+  const filterParts = [];
+  if (personF)  filterParts.push(personF);
+  if (clientF)  filterParts.push(clientF);
+  if (projectF) filterParts.push(projectF);
+  const filterStr = filterParts.length ? filterParts.join(' · ') : 'All';
+
+  document.getElementById('expPreview').innerHTML = `
+    <div class="exp-prow"><span>Period</span><strong>${esc(_exportPeriodLabel)}</strong></div>
+    <div class="exp-prow"><span>Filters</span><strong>${esc(filterStr)}</strong></div>
+    <div class="exp-prow"><span>Total hours</span><strong>${totalHours.toFixed(1)}h</strong></div>
+    <div class="exp-prow"><span>Entries · People · Projects</span><strong>${_exportEntries.length} · ${uniquePeople} · ${uniqueProjects}</strong></div>
+  `;
+
+  document.getElementById('expOverlay').classList.add('open');
+  document.getElementById('expModal').classList.add('open');
+}
+
+function closeExportModal() {
+  document.getElementById('expOverlay').classList.remove('open');
+  document.getElementById('expModal').classList.remove('open');
+}
+
+function doExport() {
+  const fmt = document.querySelector('input[name="expFmt"]:checked')?.value || 'pdf';
+  if (fmt === 'pdf') exportPDF();
+  else exportExcel();
+}
+
+// ─────────────────────────────────────────────────────────
+// EXPORT — PDF (print-to-PDF via new window)
+// ─────────────────────────────────────────────────────────
+function exportPDF() {
+  const entries = _exportEntries;
+  const periodLabel = _exportPeriodLabel || document.getElementById('periodLabel').textContent;
+  const grandTotal = entries.reduce((s, e) => s + (e.hours || 0), 0);
+  const today = new Date().toLocaleDateString('en-GB', {day:'numeric',month:'long',year:'numeric'});
+
+  // Build tree: project → item_no → person
+  const tree = {};
+  entries.forEach(e => {
+    const proj   = e.project || '(No Project)';
+    const item   = e.item_no || '—';
+    const person = e.person  || '(Unknown)';
+    const hrs    = e.hours   || 0;
+
+    if (!tree[proj]) tree[proj] = { total: 0, items: {} };
+    tree[proj].total += hrs;
+
+    if (!tree[proj].items[item]) tree[proj].items[item] = { total: 0, people: {} };
+    tree[proj].items[item].total += hrs;
+
+    tree[proj].items[item].people[person] = (tree[proj].items[item].people[person] || 0) + hrs;
+  });
+
+  let rows = '';
+  Object.entries(tree)
+    .sort((a, b) => b[1].total - a[1].total)
+    .forEach(([proj, projData]) => {
+      const projPct = grandTotal > 0 ? ((projData.total / grandTotal) * 100).toFixed(0) : 0;
+      rows += `<div class="proj-hdr"><span>${escHtml(proj)}</span><span>${projData.total.toFixed(1)}h <span class="pct">${projPct}%</span></span></div>`;
+
+      Object.entries(projData.items)
+        .sort((a, b) => b[1].total - a[1].total)
+        .forEach(([item, itemData]) => {
+          const itemPct = projData.total > 0 ? ((itemData.total / projData.total) * 100).toFixed(0) : 0;
+          rows += `<div class="item-hdr"><span>Item: ${escHtml(item)}</span><span>${itemData.total.toFixed(1)}h <span class="pct">${itemPct}% of project</span></span></div>`;
+
+          Object.entries(itemData.people)
+            .sort((a, b) => b[1] - a[1])
+            .forEach(([person, hrs]) => {
+              const pPct = itemData.total > 0 ? ((hrs / itemData.total) * 100).toFixed(0) : 0;
+              rows += `<div class="person-row"><span>${escHtml(person)}</span><span>${hrs.toFixed(1)}h <span class="pct">${pPct}%</span></span></div>`;
+            });
+        });
+
+      rows += `<div class="proj-total"><span>Project subtotal</span><span>${projData.total.toFixed(1)}h — ${projPct}% of period</span></div>`;
+    });
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DKH Hours Report — ${escHtml(periodLabel)}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#1a1a2e;padding:28px 36px;line-height:1.45}
+  .report-title{font-size:20px;font-weight:700;color:#1a1a2e;margin-bottom:4px}
+  .report-meta{font-size:11px;color:#666;margin-bottom:28px}
+  .proj-hdr{display:flex;justify-content:space-between;align-items:center;background:#1e3a8a;color:#fff;padding:8px 12px;font-size:13px;font-weight:700;margin-top:22px;border-radius:3px 3px 0 0}
+  .item-hdr{display:flex;justify-content:space-between;align-items:center;background:#dbeafe;color:#1e3a8a;padding:6px 12px;font-size:11px;font-weight:600;border-bottom:1px solid #bfdbfe}
+  .person-row{display:flex;justify-content:space-between;padding:5px 12px 5px 28px;border-bottom:1px solid #f1f5f9;font-size:12px}
+  .proj-total{display:flex;justify-content:space-between;background:#eff6ff;color:#1e40af;padding:6px 12px;font-size:11px;font-weight:600;border-top:1px solid #bfdbfe;border-radius:0 0 3px 3px;margin-bottom:4px}
+  .grand-total{display:flex;justify-content:space-between;background:#1e3a8a;color:#fff;padding:10px 14px;font-size:14px;font-weight:700;border-radius:3px;margin-top:28px}
+  .pct{font-weight:400;opacity:.65;font-size:10px;margin-left:6px}
+  @media print{body{padding:0}@page{margin:1.5cm}}
+</style>
+</head>
+<body>
+<div class="report-title">Design Know How — Hours Report</div>
+<div class="report-meta">Period: ${escHtml(periodLabel)} &nbsp;·&nbsp; Generated: ${today} &nbsp;·&nbsp; Total: ${grandTotal.toFixed(1)}h &nbsp;·&nbsp; ${entries.length} entries</div>
+${rows}
+<div class="grand-total"><span>Grand Total</span><span>${grandTotal.toFixed(1)}h</span></div>
+</body></html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) { alert('Pop-up blocked — please allow pop-ups for this page and try again.'); return; }
+  win.document.write(html);
+  win.document.close();
+  setTimeout(() => { try { win.print(); } catch(e) {} }, 600);
+}
+
+function escHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─────────────────────────────────────────────────────────
+// EXPORT — Excel (SheetJS, lazy-loaded)
+// ─────────────────────────────────────────────────────────
+function exportExcel() {
+  if (typeof XLSX !== 'undefined') { _doExportExcel(); return; }
+  const s = document.createElement('script');
+  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  s.onload  = _doExportExcel;
+  s.onerror = () => alert('Could not load Excel library — check internet connection.');
+  document.head.appendChild(s);
+}
+
+function _doExportExcel() {
+  if (!_exportEntries.length) { alert('No entries to export.'); return; }
+
+  // Sort: date asc, then person
+  const sorted = [..._exportEntries].sort((a, b) =>
+    (a.date || '').localeCompare(b.date || '') || (a.person || '').localeCompare(b.person || '')
+  );
+
+  const rows = sorted.map(e => ({
+    'Short Description of Work': e.desc      || '',
+    'Items':                     e.item_no   || '',
+    'Project':                   e.project   || '',
+    'Assigned To':               e.person    || '',
+    'Category':                  e.category  || '',
+    'Date & Time':               e.date      || '',
+    'Day':                       e.day       || '',
+    'Actual Hours':              e.hours     != null ? e.hours : '',
+    'Dept':                      '',
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+
+  // Column widths
+  const colKeys = Object.keys(rows[0]);
+  ws['!cols'] = colKeys.map(key => ({
+    wch: Math.max(key.length + 2, ...rows.map(r => String(r[key] || '').length))
+  }));
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Hours Log');
+
+  const period = (_exportPeriodLabel || document.getElementById('periodLabel').textContent)
+    .replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '-');
+  XLSX.writeFile(wb, `DKH_Hours_${period}.xlsx`);
+
+  closeExportModal();
 }
 
 // ─────────────────────────────────────────────────────────
