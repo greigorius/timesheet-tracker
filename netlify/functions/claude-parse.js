@@ -81,10 +81,21 @@ exports.handler = async (event) => {
     return respond(400, { error: 'Invalid JSON body' });
   }
 
-  const { csv, person, week_commencing, filename } = body;
+  let { csv, person, week_commencing, filename } = body;
+
+  // Accept csv_b64 (base64-encoded CSV) as a safe alternative to raw csv.
+  // This avoids Make's template engine corrupting control characters (tabs, etc.)
+  // when the CSV is embedded in a raw JSON body template.
+  if (!csv && body.csv_b64) {
+    try {
+      csv = Buffer.from(body.csv_b64, 'base64').toString('utf8');
+    } catch {
+      return respond(400, { error: 'Invalid csv_b64 — could not decode' });
+    }
+  }
 
   if (!csv) {
-    return respond(400, { error: 'Missing required field: csv' });
+    return respond(400, { error: 'Missing required field: csv or csv_b64' });
   }
 
   // Build the user message — Node.js handles JSON.stringify escaping correctly

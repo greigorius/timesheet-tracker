@@ -104,7 +104,18 @@ async function handleValidateRelations(body, token) {
     }
   }
   if (!Array.isArray(rows) || rows.length === 0) {
-    return respond(400, { error: 'rows must be a non-empty array' });
+    return respond(400, {
+      error: 'rows must be a non-empty array',
+      _debug: {
+        body_keys: Object.keys(body),
+        has_rows_b64: 'rows_b64' in body,
+        rows_b64_type: typeof body.rows_b64,
+        rows_b64_length: body.rows_b64 ? String(body.rows_b64).length : 0,
+        rows_b64_preview: body.rows_b64 ? String(body.rows_b64).slice(0, 40) : null,
+        has_rows_json: 'rows_json' in body,
+        rows_type: typeof body.rows,
+      }
+    });
   }
 
   const timesheetsDbId = process.env.NOTION_TIMESHEETS_DB;

@@ -140,17 +140,14 @@ exports.handler = async (event) => {
 
     const csv = csvLines.join('\n');
 
-    // Pre-escaped version safe for embedding directly inside a JSON string literal
-    // (used by Make.com's Raw body HTTP module which can't run char() in formulas)
-    const csvEscaped = csv
-      .replace(/\\/g, '\\\\')
-      .replace(/"/g, '\\"')
-      .replace(/\r/g, '')
-      .replace(/\n/g, '\\n');
+    // Base64-encode the CSV so Make's template engine can't corrupt it.
+    // (csv_escaped was previously used but tab/control chars in cell values
+    // could produce invalid JSON when embedded in a Make raw-body template.)
+    const csv_b64 = Buffer.from(csv).toString('base64');
 
     return respond(200, {
       csv,
-      csv_escaped: csvEscaped,
+      csv_b64,
       rows: dataRows.length,
       person,
       week_commencing: weekCommencing,
