@@ -810,9 +810,9 @@ function toast(msg,type){
 // DEMO DATA
 // ─────────────────────────────────────────────────────────
 const PEOPLE = [
-  {id:'GF',name:'Greig Fensome', color:'#3B82F6'},
-  {id:'GO',name:'Gary Openshaw', color:'#8B5CF6'},
-  {id:'AI',name:'Andrew Isted',  color:'#10B981'},
+  {id:'GF',name:'Greig Fensome', color:'#3B82F6', dept:'DM'},
+  {id:'GO',name:'Gary Openshaw', color:'#8B5CF6', dept:'DT'},
+  {id:'AI',name:'Andrew Isted',  color:'#10B981', dept:'DT'},
 ];
 const PROJECTS = ['24-367 EIT Observation Hall','24-354 EIT Auditorium','24-334 Peterborough Court'];
 const CLIENTS  = ['EIT','DKH Internal','HCA','(internal)'];
@@ -851,7 +851,8 @@ function demoEntries(){
             hours:     hrs,
             variation: Math.random()<0.2, // ~20% are variation/additional hours
             status:    isFlagged?'Flagged':'Imported',
-            sourceFile:p.id+'_'+isoWeek(dt)+'.xlsx'
+            sourceFile:p.id+'_'+isoWeek(dt)+'.xlsx',
+            dept:      p.dept || 'DT',
           });
         });
       });
@@ -1415,6 +1416,15 @@ function mapNotionPage(page){
       if(type==='relation')  return prop.relation?.[0]?._title||'';
       // people: Notion workspace member — name is returned directly
       if(type==='people')    return prop.people?.[0]?.name||'';
+      // rollup: e.g. "Dept." rolls up Person → Role (text)
+      if(type==='rollup'){
+        const item = prop.rollup?.array?.[0];
+        if(!item) continue;
+        if(item.type==='rich_text') return item.rich_text?.[0]?.plain_text||'';
+        if(item.type==='title')     return item.title?.[0]?.plain_text||'';
+        if(item.type==='select')    return item.select?.name||'';
+        if(item.type==='number')    return String(item.number??'');
+      }
     }
     return '';
   };
@@ -1457,6 +1467,9 @@ function mapNotionPage(page){
            || getProp(['Import Status','Status'],'rich_text'),
     sourceFile: getProp(['Source File','Source','File'],'rich_text'),
     variation: variationRaw,
+    dept:     (getProp(['Dept.','Dept','Department'],'rollup')
+           ||  getProp(['Dept.','Dept','Department'],'rich_text')
+           ||  getProp(['Dept.','Dept','Department'],'select')).trim().toUpperCase(),
   };
 }
 
@@ -2247,20 +2260,65 @@ function _buildDonutSVG(segments, total, size, stroke) {
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">${circles}</svg>`;
 }
 
-// A full "donut + list" report section (Project / Item / Person)
-// Percentages are always relative to grandTotal (the whole period), per spec.
-function _buildDonutSection(title, dataMap, colorFn, grandTotal) {
-  const entries = Object.entries(dataMap).sort((a, b) => b[1] - a[1]);
-  const sectionTotal = entries.reduce((s, [, v]) => s + v, 0);
-  const segments = entries.map(([name, val]) => ({ color: colorFn(name), value: val }));
+// Rolls a set of entries into { total, c, v, dm, dt } — used to build the
+// Contracted/Variation and DM/DT sub-line badges under each list row.
+function _rollupBreakdown(entryList) {
+  const d = { total: 0, c: 0, v: 0, dm: 0, dt: 0 };
+  entryList.forEach(e => {
+    const hrs = e.hours || 0;
+    d.total += hrs;
+    if (e.variation) d.v += hrs; else d.c += hrs;
+    if (e.dept === 'DM') d.dm += hrs;
+    else if (e.dept === 'DT') d.dt += hrs;
+  });
+  return d;
+}
+
+// Renders the optional Contracted/Variation and DM/DT sub-lines under a
+// list row's name, per the opts flags (showVariation / showDept).
+function _buildSubLines(d, opts) {
+  let html = '';
+  if (opts && opts.showVariation) {
+    const parts = [];
+    if (d.c) parts.push(`<span class="dn-sub-c">C ${fmtHM(d.c)}</span>`);
+    if (d.v) parts.push(`<span class="dn-sub-v">V ${fmtHM(d.v)}</span>`);
+    if (parts.length) html += `<div class="dn-sub">${parts.join('')}</div>`;
+  }
+  if (opts && opts.showDept) {
+    const parts = [];
+    if (d.dm) parts.push(`<span class="dn-sub-dm">DM ${fmtHM(d.dm)}</span>`);
+    if (d.dt) parts.push(`<span class="dn-sub-dt">DT ${fmtHM(d.dt)}</span>`);
+    if (parts.length) html += `<div class="dn-sub">${parts.join('')}</div>`;
+  }
+  return html;
+}
+
+// A full "donut + list" report section (used for Project). Optionally shows
+// Contracted/Variation and DM/DT sub-line badges per row (opts.showVariation /
+// opts.showDept). Percentages are always relative to grandTotal, per spec.
+function _buildDonutSection(title, entries, groupKeyFn, colorFn, grandTotal, opts = {}) {
+  const groups = {};
+  entries.forEach(e => {
+    const key = groupKeyFn(e);
+    (groups[key] || (groups[key] = [])).push(e);
+  });
+  const rolled = Object.entries(groups)
+    .map(([name, list]) => [name, _rollupBreakdown(list)])
+    .sort((a, b) => b[1].total - a[1].total);
+
+  const sectionTotal = rolled.reduce((s, [, d]) => s + d.total, 0);
+  const segments = rolled.map(([name, d]) => ({ color: colorFn(name), value: d.total }));
   const donutSvg = _buildDonutSVG(segments, sectionTotal, 168, 32);
 
-  const listRows = entries.map(([name, val]) => {
-    const pct = grandTotal > 0 ? ((val / grandTotal) * 100).toFixed(2) : '0.00';
+  const listRows = rolled.map(([name, d]) => {
+    const pct = grandTotal > 0 ? ((d.total / grandTotal) * 100).toFixed(2) : '0.00';
     return `<div class="dn-row">
       <span class="dn-dot" style="background:${colorFn(name)}"></span>
-      <span class="dn-name">${escHtml(name)}</span>
-      <span class="dn-hrs">${fmtHM(val)}</span>
+      <div class="dn-main">
+        <div class="dn-name">${escHtml(name)}</div>
+        ${_buildSubLines(d, opts)}
+      </div>
+      <span class="dn-hrs">${fmtHM(d.total)}</span>
       <span class="dn-pct">${pct}%</span>
     </div>`;
   }).join('');
@@ -2281,38 +2339,44 @@ function _buildDonutSection(title, dataMap, colorFn, grandTotal) {
 // (used for the Item and Person sections). The donut itself stays flat —
 // coloured by item/person, exactly like the ungrouped version — only the
 // list is reorganised under each project. Percentages relative to grandTotal.
-function _buildGroupedSection(title, entries, groupKeyFn, groupColorFn, grandTotal) {
-  const flatTotals = {};
+// Optionally shows Contracted/Variation and DM/DT sub-line badges per leaf row.
+function _buildGroupedSection(title, entries, groupKeyFn, groupColorFn, grandTotal, opts = {}) {
+  const flatGroups = {};
   entries.forEach(e => {
     const key = groupKeyFn(e);
-    flatTotals[key] = (flatTotals[key] || 0) + (e.hours || 0);
+    (flatGroups[key] || (flatGroups[key] = [])).push(e);
   });
-  const flatEntries = Object.entries(flatTotals).sort((a, b) => b[1] - a[1]);
-  const sectionTotal = flatEntries.reduce((s, [, v]) => s + v, 0);
-  const segments = flatEntries.map(([name, val]) => ({ color: groupColorFn(name), value: val }));
+  const flatRolled = Object.entries(flatGroups)
+    .map(([name, list]) => [name, _rollupBreakdown(list)])
+    .sort((a, b) => b[1].total - a[1].total);
+  const sectionTotal = flatRolled.reduce((s, [, d]) => s + d.total, 0);
+  const segments = flatRolled.map(([name, d]) => ({ color: groupColorFn(name), value: d.total }));
   const donutSvg = _buildDonutSVG(segments, sectionTotal, 168, 32);
 
   const byProject = {};
   entries.forEach(e => {
     const proj = e.project || '(No Project)';
     const key  = groupKeyFn(e);
-    const hrs  = e.hours || 0;
     if (!byProject[proj]) byProject[proj] = { total: 0, items: {} };
-    byProject[proj].total += hrs;
-    byProject[proj].items[key] = (byProject[proj].items[key] || 0) + hrs;
+    byProject[proj].total += (e.hours || 0);
+    (byProject[proj].items[key] || (byProject[proj].items[key] = [])).push(e);
   });
 
   const listHtml = Object.entries(byProject)
     .sort((a, b) => b[1].total - a[1].total)
     .map(([proj, projData]) => {
       const rows = Object.entries(projData.items)
-        .sort((a, b) => b[1] - a[1])
-        .map(([name, val]) => {
-          const pct = grandTotal > 0 ? ((val / grandTotal) * 100).toFixed(2) : '0.00';
+        .map(([name, list]) => [name, _rollupBreakdown(list)])
+        .sort((a, b) => b[1].total - a[1].total)
+        .map(([name, d]) => {
+          const pct = grandTotal > 0 ? ((d.total / grandTotal) * 100).toFixed(2) : '0.00';
           return `<div class="dn-row dn-row-sub">
             <span class="dn-dot" style="background:${groupColorFn(name)}"></span>
-            <span class="dn-name">${escHtml(name)}</span>
-            <span class="dn-hrs">${fmtHM(val)}</span>
+            <div class="dn-main">
+              <div class="dn-name">${escHtml(name)}</div>
+              ${_buildSubLines(d, opts)}
+            </div>
+            <span class="dn-hrs">${fmtHM(d.total)}</span>
             <span class="dn-pct">${pct}%</span>
           </div>`;
         }).join('');
@@ -2354,8 +2418,9 @@ function exportPDF() {
   const weekBuckets = _buildWeekBuckets(entries, rangeFrom, rangeTo);
   const barChartSvg = _buildBarChartSVG(weekBuckets, projectOrder);
 
-  const projectSection = _buildDonutSection('Project', byProject, getProjColor, grandTotal);
-  const itemSection    = _buildGroupedSection('Item',   entries, e => e.item_no || '(No Item)',    getItemColor,   grandTotal);
+  const breakdownOpts = { showVariation: true, showDept: true };
+  const projectSection = _buildDonutSection('Project', entries, e => e.project || '(No Project)', getProjColor,   grandTotal, breakdownOpts);
+  const itemSection    = _buildGroupedSection('Item',   entries, e => e.item_no || '(No Item)',    getItemColor,   grandTotal, breakdownOpts);
   const personSection  = _buildGroupedSection('Person', entries, e => e.person  || '(Unassigned)', getPersonColor, grandTotal);
 
   // ── Hierarchical breakdown table: Project → Item → Person
@@ -2411,12 +2476,18 @@ function exportPDF() {
   .rpt-donut-wrap{position:relative;flex-shrink:0}
   .rpt-donut-center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#111827}
   .rpt-donut-list{flex:1;min-width:0}
-  .dn-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f3f4f6;font-size:11.5px}
+  .dn-row{display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f3f4f6;font-size:11.5px}
   .dn-row:last-child{border-bottom:none}
-  .dn-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-  .dn-name{flex:1;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .dn-hrs{width:58px;text-align:right;font-weight:600;color:#111827;flex-shrink:0}
-  .dn-pct{width:58px;text-align:right;color:#6b7280;flex-shrink:0}
+  .dn-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:3px}
+  .dn-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+  .dn-name{color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dn-sub{font-size:9.5px;display:flex;gap:10px}
+  .dn-sub-c{color:#2563eb;font-weight:600}
+  .dn-sub-v{color:#d97706;font-weight:600}
+  .dn-sub-dm{color:#7c3aed;font-weight:600}
+  .dn-sub-dt{color:#0891b2;font-weight:600}
+  .dn-hrs{width:58px;text-align:right;font-weight:600;color:#111827;flex-shrink:0;margin-top:1px}
+  .dn-pct{width:58px;text-align:right;color:#6b7280;flex-shrink:0;margin-top:1px}
   .dn-empty{color:#9ca3af;font-size:11.5px;padding:8px 0}
   .dn-group-hdr{display:flex;align-items:center;gap:8px;padding:8px 0 6px;margin-top:12px;border-bottom:1px solid #d1d5db;font-size:11.5px;font-weight:700;color:#111827}
   .dn-group-hdr:first-child{margin-top:0}
