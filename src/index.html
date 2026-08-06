@@ -1504,15 +1504,19 @@ const PALETTE = [
 // Stable colour maps — assigned once, reused everywhere
 let personColorMap = {};
 let projColorMap   = {};
+let itemColorMap   = {};
 
 function assignColors() {
   const people = [...new Set(allEntries.map(e => e.person))].sort();
   const projs  = [...new Set(allEntries.map(e => e.project).filter(Boolean))].sort();
+  const items  = [...new Set(allEntries.map(e => e.item_no).filter(Boolean))].sort();
   people.forEach((p, i) => { if (!personColorMap[p]) personColorMap[p] = PALETTE[i % PALETTE.length]; });
   projs.forEach((p, i)  => { if (!projColorMap[p])   projColorMap[p]   = PALETTE[i % PALETTE.length]; });
+  items.forEach((it, i) => { if (!itemColorMap[it])  itemColorMap[it]  = PALETTE[i % PALETTE.length]; });
 }
 function getPersonColor(name) { return personColorMap[name] || PALETTE[0]; }
 function getProjColor(name)   { return projColorMap[name]   || PALETTE[0]; }
+function getItemColor(name)   { return itemColorMap[name]   || PALETTE[0]; }
 
 // legacy aliases expected elsewhere
 function initPersonColors() { assignColors(); }
@@ -2096,53 +2100,226 @@ function doExport() {
 }
 
 // ─────────────────────────────────────────────────────────
-// EXPORT — PDF (print-to-PDF via new window)
+// EXPORT — PDF (Clockify-style report, print-to-PDF via new window)
 // ─────────────────────────────────────────────────────────
+
+// Format decimal hours as H:MM (e.g. 12.5 → "12:30")
+function fmtHM(h) {
+  const totalMin = Math.round((h || 0) * 60);
+  const hh = Math.floor(totalMin / 60);
+  const mm = totalMin % 60;
+  return hh + ':' + String(mm).padStart(2, '0');
+}
+
+// Round up to a "nice" axis maximum (1/2/5/10 × 10^n)
+function _niceMax(v) {
+  if (!v || v <= 0) return 10;
+  const mag = Math.pow(10, Math.floor(Math.log10(v)));
+  const norm = v / mag;
+  let niceNorm;
+  if (norm <= 1) niceNorm = 1;
+  else if (norm <= 2) niceNorm = 2;
+  else if (norm <= 5) niceNorm = 5;
+  else niceNorm = 10;
+  return niceNorm * mag;
+}
+
+// Resolve the date range currently active on the panel (week / month / custom)
+function _getExportDateRange(entries) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  if (viewMode === 'week') {
+    const ws = getWeekStart(today, viewOffset);
+    const we = new Date(ws); we.setDate(ws.getDate() + 6);
+    return { from: ws, to: we };
+  }
+  if (viewMode === 'month') {
+    const y = today.getFullYear();
+    const m = today.getMonth() + viewOffset;
+    return { from: new Date(y, m, 1), to: new Date(y, m + 1, 0) };
+  }
+  const fromVal = document.getElementById('cvDateFrom')?.value;
+  const toVal   = document.getElementById('cvDateTo')?.value;
+  if (fromVal && toVal) {
+    return { from: new Date(fromVal + 'T00:00:00'), to: new Date(toVal + 'T00:00:00') };
+  }
+  const dates = entries.map(e => e.date).filter(Boolean).sort();
+  if (dates.length) {
+    return { from: new Date(dates[0] + 'T00:00:00'), to: new Date(dates[dates.length - 1] + 'T00:00:00') };
+  }
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  return { from: t, to: t };
+}
+
+// Bucket entries into Monday–Sunday weeks spanning [from, to]
+function _buildWeekBuckets(entries, from, to) {
+  const buckets = [];
+  let ws = getWeekStart(from, 0);
+  let safety = 0;
+  while (ws <= to && safety < 60) {
+    const we = new Date(ws); we.setDate(ws.getDate() + 6);
+    buckets.push({
+      label: ws.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
+      from: new Date(ws),
+      to: we,
+      value: 0,
+    });
+    ws = new Date(ws); ws.setDate(ws.getDate() + 7);
+    safety++;
+  }
+  entries.forEach(e => {
+    if (!e.date) return;
+    const d = new Date(e.date + 'T00:00:00');
+    const b = buckets.find(bk => d >= bk.from && d <= bk.to);
+    if (b) b.value += (e.hours || 0);
+  });
+  return buckets;
+}
+
+// Colour-coded vertical bar chart — weeks on X, hours on Y
+function _buildBarChartSVG(buckets) {
+  const width = 740, height = 240;
+  const padL = 44, padR = 10, padT = 24, padB = 30;
+  const chartW = width - padL - padR;
+  const chartH = height - padT - padB;
+  const maxVal = _niceMax(Math.max(...buckets.map(b => b.value), 0));
+  const gridSteps = 5;
+  const barCount = buckets.length || 1;
+  const barSlot  = chartW / barCount;
+  const barWidth = Math.min(46, barSlot * 0.5);
+
+  let gridLines = '', yLabels = '';
+  for (let i = 0; i <= gridSteps; i++) {
+    const val = maxVal * i / gridSteps;
+    const y = padT + chartH - (chartH * i / gridSteps);
+    gridLines += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${padL + chartW}" y2="${y.toFixed(1)}" stroke="#e5e7eb" stroke-width="1"${i === 0 ? '' : ' stroke-dasharray="2,3"'}/>`;
+    yLabels += `<text x="${padL - 8}" y="${(y + 3).toFixed(1)}" font-size="9" fill="#6b7280" text-anchor="end" font-family="Arial">${val.toFixed(1)}h</text>`;
+  }
+
+  let bars = '', xLabels = '';
+  buckets.forEach((b, i) => {
+    const x = padL + barSlot * i + (barSlot - barWidth) / 2;
+    const barH = maxVal > 0 ? (b.value / maxVal) * chartH : 0;
+    const y = padT + chartH - barH;
+    const color = PALETTE[i % PALETTE.length];
+    bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barH.toFixed(1)}" fill="${color}" rx="2"/>`;
+    if (b.value > 0) {
+      bars += `<text x="${(x + barWidth / 2).toFixed(1)}" y="${(y - 6).toFixed(1)}" font-size="9" fill="#374151" text-anchor="middle" font-family="Arial">${fmtHM(b.value)}h</text>`;
+    }
+    xLabels += `<text x="${(x + barWidth / 2).toFixed(1)}" y="${(padT + chartH + 16).toFixed(1)}" font-size="9" fill="#6b7280" text-anchor="middle" font-family="Arial">${escHtml(b.label)}</text>`;
+  });
+
+  return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+    ${gridLines}${yLabels}${bars}${xLabels}
+    <line x1="${padL}" y1="${(padT + chartH).toFixed(1)}" x2="${padL + chartW}" y2="${(padT + chartH).toFixed(1)}" stroke="#9ca3af" stroke-width="1"/>
+  </svg>`;
+}
+
+// Colour-coded donut chart — one ring, segments proportional to value
+function _buildDonutSVG(segments, total, size, stroke) {
+  const r = (size - stroke) / 2;
+  const cx = size / 2, cy = size / 2;
+  const circumference = 2 * Math.PI * r;
+  let offset = 0, circles = '';
+  if (total <= 0) {
+    circles = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#e5e7eb" stroke-width="${stroke}"/>`;
+  } else {
+    segments.forEach(seg => {
+      const frac = seg.value / total;
+      if (frac <= 0) return;
+      const dash = frac * circumference;
+      circles += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${seg.color}" stroke-width="${stroke}" stroke-dasharray="${dash.toFixed(2)} ${(circumference - dash).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 ${cx} ${cy})"/>`;
+      offset += dash;
+    });
+  }
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">${circles}</svg>`;
+}
+
+// A full "donut + list" report section (Project / Item / Person)
+// Percentages are always relative to grandTotal (the whole period), per spec.
+function _buildDonutSection(title, dataMap, colorFn, grandTotal) {
+  const entries = Object.entries(dataMap).sort((a, b) => b[1] - a[1]);
+  const sectionTotal = entries.reduce((s, [, v]) => s + v, 0);
+  const segments = entries.map(([name, val]) => ({ color: colorFn(name), value: val }));
+  const donutSvg = _buildDonutSVG(segments, sectionTotal, 168, 32);
+
+  const listRows = entries.map(([name, val]) => {
+    const pct = grandTotal > 0 ? ((val / grandTotal) * 100).toFixed(2) : '0.00';
+    return `<div class="dn-row">
+      <span class="dn-dot" style="background:${colorFn(name)}"></span>
+      <span class="dn-name">${escHtml(name)}</span>
+      <span class="dn-hrs">${fmtHM(val)}</span>
+      <span class="dn-pct">${pct}%</span>
+    </div>`;
+  }).join('');
+
+  return `<div class="rpt-section">
+    <div class="rpt-section-title">${escHtml(title)}</div>
+    <div class="rpt-donut-row">
+      <div class="rpt-donut-wrap" style="width:168px;height:168px">
+        ${donutSvg}
+        <div class="rpt-donut-center">${fmtHM(sectionTotal)}</div>
+      </div>
+      <div class="rpt-donut-list">${listRows || '<div class="dn-empty">No data</div>'}</div>
+    </div>
+  </div>`;
+}
+
 function exportPDF() {
   const entries = _exportEntries;
   const periodLabel = _exportPeriodLabel || document.getElementById('periodLabel').textContent;
   const grandTotal = entries.reduce((s, e) => s + (e.hours || 0), 0);
-  const today = new Date().toLocaleDateString('en-GB', {day:'numeric',month:'long',year:'numeric'});
+  const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
-  // Build tree: project → item_no → person
+  // ── Weekly bar chart
+  const { from: rangeFrom, to: rangeTo } = _getExportDateRange(entries);
+  const weekBuckets = _buildWeekBuckets(entries, rangeFrom, rangeTo);
+  const barChartSvg = _buildBarChartSVG(weekBuckets);
+
+  // ── Group sums — blanks bucketed into fallback labels so every donut totals grandTotal
+  const byProject = {}, byItem = {}, byPerson = {};
+  entries.forEach(e => {
+    const proj   = e.project || '(No Project)';
+    const item   = e.item_no || '(No Item)';
+    const person = e.person  || '(Unassigned)';
+    const hrs    = e.hours   || 0;
+    byProject[proj]   = (byProject[proj]   || 0) + hrs;
+    byItem[item]       = (byItem[item]     || 0) + hrs;
+    byPerson[person]   = (byPerson[person] || 0) + hrs;
+  });
+
+  const projectSection = _buildDonutSection('Project', byProject, getProjColor,   grandTotal);
+  const itemSection    = _buildDonutSection('Item',    byItem,    getItemColor,   grandTotal);
+  const personSection  = _buildDonutSection('Person',  byPerson,  getPersonColor, grandTotal);
+
+  // ── Hierarchical breakdown table: Project → Item → Person
   const tree = {};
   entries.forEach(e => {
     const proj   = e.project || '(No Project)';
-    const item   = e.item_no || '—';
-    const person = e.person  || '(Unknown)';
+    const item   = e.item_no || '(No Item)';
+    const person = e.person  || '(Unassigned)';
     const hrs    = e.hours   || 0;
-
     if (!tree[proj]) tree[proj] = { total: 0, items: {} };
     tree[proj].total += hrs;
-
     if (!tree[proj].items[item]) tree[proj].items[item] = { total: 0, people: {} };
     tree[proj].items[item].total += hrs;
-
     tree[proj].items[item].people[person] = (tree[proj].items[item].people[person] || 0) + hrs;
   });
 
-  let rows = '';
+  let treeRows = '';
   Object.entries(tree)
     .sort((a, b) => b[1].total - a[1].total)
     .forEach(([proj, projData]) => {
-      const projPct = grandTotal > 0 ? ((projData.total / grandTotal) * 100).toFixed(0) : 0;
-      rows += `<div class="proj-hdr"><span>${escHtml(proj)}</span><span>${projData.total.toFixed(1)}h <span class="pct">${projPct}%</span></span></div>`;
-
+      treeRows += `<div class="rpt-tree-row lvl0"><span>${escHtml(proj)}</span><span>${fmtHM(projData.total)}</span></div>`;
       Object.entries(projData.items)
         .sort((a, b) => b[1].total - a[1].total)
         .forEach(([item, itemData]) => {
-          const itemPct = projData.total > 0 ? ((itemData.total / projData.total) * 100).toFixed(0) : 0;
-          rows += `<div class="item-hdr"><span>Item: ${escHtml(item)}</span><span>${itemData.total.toFixed(1)}h <span class="pct">${itemPct}% of project</span></span></div>`;
-
+          treeRows += `<div class="rpt-tree-row lvl1"><span>${escHtml(item)}</span><span>${fmtHM(itemData.total)}</span></div>`;
           Object.entries(itemData.people)
             .sort((a, b) => b[1] - a[1])
             .forEach(([person, hrs]) => {
-              const pPct = itemData.total > 0 ? ((hrs / itemData.total) * 100).toFixed(0) : 0;
-              rows += `<div class="person-row"><span>${escHtml(person)}</span><span>${hrs.toFixed(1)}h <span class="pct">${pPct}%</span></span></div>`;
+              treeRows += `<div class="rpt-tree-row lvl2"><span>${escHtml(person)}</span><span>${fmtHM(hrs)}</span></div>`;
             });
         });
-
-      rows += `<div class="proj-total"><span>Project subtotal</span><span>${projData.total.toFixed(1)}h — ${projPct}% of period</span></div>`;
     });
 
   const html = `<!DOCTYPE html>
@@ -2152,30 +2329,70 @@ function exportPDF() {
 <title>DKH Hours Report — ${escHtml(periodLabel)}</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#1a1a2e;padding:28px 36px;line-height:1.45}
-  .report-title{font-size:20px;font-weight:700;color:#1a1a2e;margin-bottom:4px}
-  .report-meta{font-size:11px;color:#666;margin-bottom:28px}
-  .proj-hdr{display:flex;justify-content:space-between;align-items:center;background:#1e3a8a;color:#fff;padding:8px 12px;font-size:13px;font-weight:700;margin-top:22px;border-radius:3px 3px 0 0}
-  .item-hdr{display:flex;justify-content:space-between;align-items:center;background:#dbeafe;color:#1e3a8a;padding:6px 12px;font-size:11px;font-weight:600;border-bottom:1px solid #bfdbfe}
-  .person-row{display:flex;justify-content:space-between;padding:5px 12px 5px 28px;border-bottom:1px solid #f1f5f9;font-size:12px}
-  .proj-total{display:flex;justify-content:space-between;background:#eff6ff;color:#1e40af;padding:6px 12px;font-size:11px;font-weight:600;border-top:1px solid #bfdbfe;border-radius:0 0 3px 3px;margin-bottom:4px}
-  .grand-total{display:flex;justify-content:space-between;background:#1e3a8a;color:#fff;padding:10px 14px;font-size:14px;font-weight:700;border-radius:3px;margin-top:28px}
-  .pct{font-weight:400;opacity:.65;font-size:10px;margin-left:6px}
-  @media print{body{padding:0}@page{margin:1.5cm}}
+  body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#111827;padding:32px 40px;line-height:1.4}
+  .rpt-header-row{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2px}
+  .report-title{font-size:24px;font-weight:700;color:#111827}
+  .rpt-brand{font-size:12px;font-weight:700;color:#9ca3af;letter-spacing:.04em}
+  .report-period{font-size:12px;color:#6b7280;margin-top:4px}
+  .report-total-row{margin-top:16px;margin-bottom:22px}
+  .report-total-label{font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-right:8px}
+  .report-total-value{font-size:22px;font-weight:700;color:#111827}
+  .rpt-barchart-wrap{margin-bottom:8px}
+  .rpt-section{margin-top:32px;page-break-inside:avoid}
+  .rpt-section-title{font-size:14px;font-weight:700;color:#111827;padding-bottom:8px;border-bottom:1px solid #e5e7eb;margin-bottom:16px;page-break-after:avoid}
+  .rpt-donut-row{display:flex;gap:32px;align-items:flex-start}
+  .rpt-donut-wrap{position:relative;flex-shrink:0}
+  .rpt-donut-center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#111827}
+  .rpt-donut-list{flex:1;min-width:0}
+  .dn-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f3f4f6;font-size:11.5px}
+  .dn-row:last-child{border-bottom:none}
+  .dn-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .dn-name{flex:1;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dn-hrs{width:58px;text-align:right;font-weight:600;color:#111827;flex-shrink:0}
+  .dn-pct{width:58px;text-align:right;color:#6b7280;flex-shrink:0}
+  .dn-empty{color:#9ca3af;font-size:11.5px;padding:8px 0}
+  .rpt-tree-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f3f4f6;font-size:12px}
+  .rpt-tree-row.lvl0{font-weight:700;color:#111827;margin-top:6px;padding-top:10px;border-bottom:1px solid #d1d5db}
+  .rpt-tree-row.lvl1{padding-left:20px;color:#374151}
+  .rpt-tree-row.lvl2{padding-left:40px;color:#6b7280;font-size:11.5px}
+  .rpt-footer{margin-top:10px;font-size:9px;color:#9ca3af;text-align:right}
+  @media print{body{padding:0 8mm}@page{margin:14mm 10mm}}
 </style>
 </head>
 <body>
-<div class="report-title">Design Know How — Hours Report</div>
-<div class="report-meta">Period: ${escHtml(periodLabel)} &nbsp;·&nbsp; Generated: ${today} &nbsp;·&nbsp; Total: ${grandTotal.toFixed(1)}h &nbsp;·&nbsp; ${entries.length} entries</div>
-${rows}
-<div class="grand-total"><span>Grand Total</span><span>${grandTotal.toFixed(1)}h</span></div>
+
+<div class="rpt-header-row">
+  <div>
+    <div class="report-title">Hours Report</div>
+    <div class="report-period">${escHtml(periodLabel)}</div>
+  </div>
+  <div class="rpt-brand">DESIGN KNOW HOW</div>
+</div>
+<div class="report-total-row">
+  <span class="report-total-label">Total</span>
+  <span class="report-total-value">${fmtHM(grandTotal)}</span>
+</div>
+
+<div class="rpt-barchart-wrap">${barChartSvg}</div>
+
+${projectSection}
+${itemSection}
+${personSection}
+
+<div class="rpt-section">
+  <div class="rpt-section-title">Project / Item / Person</div>
+  ${treeRows || '<div class="dn-empty">No data</div>'}
+</div>
+
+<div class="rpt-footer">Generated ${today} &nbsp;·&nbsp; ${entries.length} entries</div>
+
 </body></html>`;
 
   const win = window.open('', '_blank');
   if (!win) { alert('Pop-up blocked — please allow pop-ups for this page and try again.'); return; }
   win.document.write(html);
   win.document.close();
-  setTimeout(() => { try { win.print(); } catch(e) {} }, 600);
+  setTimeout(() => { try { win.print(); } catch (e) {} }, 600);
 }
 
 function escHtml(s) {
