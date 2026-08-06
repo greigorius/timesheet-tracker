@@ -1453,7 +1453,8 @@ function mapNotionPage(page){
            || getProp(['Project'],'relation')
            || getProp(['Project','Project Reference','Job','Scheme'],'rich_text')
            || getProp(['Project'],'title'),
-    item_no:  getProp(['Item'],'relation')
+    item_no:  getProp(['Items'],'formula')
+           || getProp(['Item'],'relation')
            || getProp(['Item No.','Item No','ItemNo','item_no'],'rich_text'),
     category: getProp(['Category','Cat','Type'],'select'),
     desc:     getProp(['Short Description of Work Done','Description','Notes','Desc'],'title')
