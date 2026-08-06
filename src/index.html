@@ -2150,7 +2150,8 @@ function _getExportDateRange(entries) {
   return { from: t, to: t };
 }
 
-// Bucket entries into Monday–Sunday weeks spanning [from, to]
+// Bucket entries into Monday–Sunday weeks spanning [from, to], tracking a
+// per-project breakdown within each week so the bar chart can be stacked.
 function _buildWeekBuckets(entries, from, to) {
   const buckets = [];
   let ws = getWeekStart(from, 0);
@@ -2162,6 +2163,7 @@ function _buildWeekBuckets(entries, from, to) {
       from: new Date(ws),
       to: we,
       value: 0,
+      projects: {},
     });
     ws = new Date(ws); ws.setDate(ws.getDate() + 7);
     safety++;
@@ -2170,13 +2172,19 @@ function _buildWeekBuckets(entries, from, to) {
     if (!e.date) return;
     const d = new Date(e.date + 'T00:00:00');
     const b = buckets.find(bk => d >= bk.from && d <= bk.to);
-    if (b) b.value += (e.hours || 0);
+    if (b) {
+      const hrs  = e.hours || 0;
+      const proj = e.project || '(No Project)';
+      b.value += hrs;
+      b.projects[proj] = (b.projects[proj] || 0) + hrs;
+    }
   });
   return buckets;
 }
 
-// Colour-coded vertical bar chart — weeks on X, hours on Y
-function _buildBarChartSVG(buckets) {
+// Colour-coded vertical bar chart — weeks on X, hours on Y, each bar split
+// into project segments (same colours as the Project donut below).
+function _buildBarChartSVG(buckets, projectOrder) {
   const width = 740, height = 240;
   const padL = 44, padR = 10, padT = 24, padB = 30;
   const chartW = width - padL - padR;
@@ -2198,12 +2206,17 @@ function _buildBarChartSVG(buckets) {
   let bars = '', xLabels = '';
   buckets.forEach((b, i) => {
     const x = padL + barSlot * i + (barSlot - barWidth) / 2;
-    const barH = maxVal > 0 ? (b.value / maxVal) * chartH : 0;
-    const y = padT + chartH - barH;
-    const color = PALETTE[i % PALETTE.length];
-    bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barH.toFixed(1)}" fill="${color}" rx="2"/>`;
+    let yCursor = padT + chartH;
+    projectOrder.forEach(proj => {
+      const hrs = b.projects[proj] || 0;
+      if (hrs <= 0) return;
+      const segH = maxVal > 0 ? (hrs / maxVal) * chartH : 0;
+      const segY = yCursor - segH;
+      bars += `<rect x="${x.toFixed(1)}" y="${segY.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${segH.toFixed(1)}" fill="${getProjColor(proj)}" stroke="#fff" stroke-width="0.5"/>`;
+      yCursor = segY;
+    });
     if (b.value > 0) {
-      bars += `<text x="${(x + barWidth / 2).toFixed(1)}" y="${(y - 6).toFixed(1)}" font-size="9" fill="#374151" text-anchor="middle" font-family="Arial">${fmtHM(b.value)}h</text>`;
+      bars += `<text x="${(x + barWidth / 2).toFixed(1)}" y="${(yCursor - 6).toFixed(1)}" font-size="9" fill="#374151" text-anchor="middle" font-family="Arial">${fmtHM(b.value)}h</text>`;
     }
     xLabels += `<text x="${(x + barWidth / 2).toFixed(1)}" y="${(padT + chartH + 16).toFixed(1)}" font-size="9" fill="#6b7280" text-anchor="middle" font-family="Arial">${escHtml(b.label)}</text>`;
   });
@@ -2264,32 +2277,86 @@ function _buildDonutSection(title, dataMap, colorFn, grandTotal) {
   </div>`;
 }
 
+// A "donut + list" section where the list is grouped under project headers
+// (used for the Item and Person sections). The donut itself stays flat —
+// coloured by item/person, exactly like the ungrouped version — only the
+// list is reorganised under each project. Percentages relative to grandTotal.
+function _buildGroupedSection(title, entries, groupKeyFn, groupColorFn, grandTotal) {
+  const flatTotals = {};
+  entries.forEach(e => {
+    const key = groupKeyFn(e);
+    flatTotals[key] = (flatTotals[key] || 0) + (e.hours || 0);
+  });
+  const flatEntries = Object.entries(flatTotals).sort((a, b) => b[1] - a[1]);
+  const sectionTotal = flatEntries.reduce((s, [, v]) => s + v, 0);
+  const segments = flatEntries.map(([name, val]) => ({ color: groupColorFn(name), value: val }));
+  const donutSvg = _buildDonutSVG(segments, sectionTotal, 168, 32);
+
+  const byProject = {};
+  entries.forEach(e => {
+    const proj = e.project || '(No Project)';
+    const key  = groupKeyFn(e);
+    const hrs  = e.hours || 0;
+    if (!byProject[proj]) byProject[proj] = { total: 0, items: {} };
+    byProject[proj].total += hrs;
+    byProject[proj].items[key] = (byProject[proj].items[key] || 0) + hrs;
+  });
+
+  const listHtml = Object.entries(byProject)
+    .sort((a, b) => b[1].total - a[1].total)
+    .map(([proj, projData]) => {
+      const rows = Object.entries(projData.items)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, val]) => {
+          const pct = grandTotal > 0 ? ((val / grandTotal) * 100).toFixed(2) : '0.00';
+          return `<div class="dn-row dn-row-sub">
+            <span class="dn-dot" style="background:${groupColorFn(name)}"></span>
+            <span class="dn-name">${escHtml(name)}</span>
+            <span class="dn-hrs">${fmtHM(val)}</span>
+            <span class="dn-pct">${pct}%</span>
+          </div>`;
+        }).join('');
+      return `<div class="dn-group-hdr">
+        <span class="dn-group-dot" style="background:${getProjColor(proj)}"></span>
+        <span class="dn-group-name">${escHtml(proj)}</span>
+        <span class="dn-group-hrs">${fmtHM(projData.total)}</span>
+      </div>${rows}`;
+    }).join('');
+
+  return `<div class="rpt-section">
+    <div class="rpt-section-title">${escHtml(title)}</div>
+    <div class="rpt-donut-row">
+      <div class="rpt-donut-wrap" style="width:168px;height:168px">
+        ${donutSvg}
+        <div class="rpt-donut-center">${fmtHM(sectionTotal)}</div>
+      </div>
+      <div class="rpt-donut-list">${listHtml || '<div class="dn-empty">No data</div>'}</div>
+    </div>
+  </div>`;
+}
+
 function exportPDF() {
   const entries = _exportEntries;
   const periodLabel = _exportPeriodLabel || document.getElementById('periodLabel').textContent;
   const grandTotal = entries.reduce((s, e) => s + (e.hours || 0), 0);
   const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
-  // ── Weekly bar chart
+  // ── Group sums — blanks bucketed into fallback labels so every donut totals grandTotal
+  const byProject = {};
+  entries.forEach(e => {
+    const proj = e.project || '(No Project)';
+    byProject[proj] = (byProject[proj] || 0) + (e.hours || 0);
+  });
+  const projectOrder = Object.entries(byProject).sort((a, b) => b[1] - a[1]).map(([p]) => p);
+
+  // ── Weekly bar chart — stacked by project, same order/colours as the Project donut
   const { from: rangeFrom, to: rangeTo } = _getExportDateRange(entries);
   const weekBuckets = _buildWeekBuckets(entries, rangeFrom, rangeTo);
-  const barChartSvg = _buildBarChartSVG(weekBuckets);
+  const barChartSvg = _buildBarChartSVG(weekBuckets, projectOrder);
 
-  // ── Group sums — blanks bucketed into fallback labels so every donut totals grandTotal
-  const byProject = {}, byItem = {}, byPerson = {};
-  entries.forEach(e => {
-    const proj   = e.project || '(No Project)';
-    const item   = e.item_no || '(No Item)';
-    const person = e.person  || '(Unassigned)';
-    const hrs    = e.hours   || 0;
-    byProject[proj]   = (byProject[proj]   || 0) + hrs;
-    byItem[item]       = (byItem[item]     || 0) + hrs;
-    byPerson[person]   = (byPerson[person] || 0) + hrs;
-  });
-
-  const projectSection = _buildDonutSection('Project', byProject, getProjColor,   grandTotal);
-  const itemSection    = _buildDonutSection('Item',    byItem,    getItemColor,   grandTotal);
-  const personSection  = _buildDonutSection('Person',  byPerson,  getPersonColor, grandTotal);
+  const projectSection = _buildDonutSection('Project', byProject, getProjColor, grandTotal);
+  const itemSection    = _buildGroupedSection('Item',   entries, e => e.item_no || '(No Item)',    getItemColor,   grandTotal);
+  const personSection  = _buildGroupedSection('Person', entries, e => e.person  || '(Unassigned)', getPersonColor, grandTotal);
 
   // ── Hierarchical breakdown table: Project → Item → Person
   const tree = {};
@@ -2351,6 +2418,12 @@ function exportPDF() {
   .dn-hrs{width:58px;text-align:right;font-weight:600;color:#111827;flex-shrink:0}
   .dn-pct{width:58px;text-align:right;color:#6b7280;flex-shrink:0}
   .dn-empty{color:#9ca3af;font-size:11.5px;padding:8px 0}
+  .dn-group-hdr{display:flex;align-items:center;gap:8px;padding:8px 0 6px;margin-top:12px;border-bottom:1px solid #d1d5db;font-size:11.5px;font-weight:700;color:#111827}
+  .dn-group-hdr:first-child{margin-top:0}
+  .dn-group-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .dn-group-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dn-group-hrs{font-weight:700;color:#111827}
+  .dn-row-sub{padding-left:16px}
   .rpt-tree-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f3f4f6;font-size:12px}
   .rpt-tree-row.lvl0{font-weight:700;color:#111827;margin-top:6px;padding-top:10px;border-bottom:1px solid #d1d5db}
   .rpt-tree-row.lvl1{padding-left:20px;color:#374151}
@@ -2366,7 +2439,7 @@ function exportPDF() {
     <div class="report-title">Hours Report</div>
     <div class="report-period">${escHtml(periodLabel)}</div>
   </div>
-  <div class="rpt-brand">DESIGN KNOW HOW</div>
+  <div class="rpt-brand">DESIGN KNOWHOW</div>
 </div>
 <div class="report-total-row">
   <span class="report-total-label">Total</span>
