@@ -1313,8 +1313,15 @@ let allEntries=[];
 // overwriting data when the user reloads while a fetch is in progress.
 let _loadGen = 0;
 
+// Load-outcome flags — surfaced in the Import Log row count so a failed/partial
+// load is visible instead of silently swapping real data for demo data.
+let _loadPartial      = false; // stream stopped early but kept whatever real rows it had
+let _loadDemoFallback = false; // nothing loaded at all — showing demo data instead
+
 async function loadData(){
   allEntries = [];
+  _loadPartial = false;
+  _loadDemoFallback = false;
   const gen = ++_loadGen;
   // Show immediate loading state in the table
   document.getElementById('logBody').innerHTML =
@@ -1329,9 +1336,23 @@ async function loadData(){
       await streamNotionEntries(onPageLoaded, gen);
     }catch(e){
       if(_loadGen !== gen) return; // superseded — discard
-      console.warn('Notion fetch failed, falling back to demo data:', e.message);
-      allEntries = demoEntries();
-      _renderAll();
+      if(allEntries.length){
+        // Partial success — keep the real rows already streamed in rather than
+        // discarding them. A single flaky page (e.g. a transient 502) shouldn't
+        // wipe out an otherwise-successful load.
+        console.warn('Notion load interrupted after '+allEntries.length+' rows:', e.message);
+        _loadPartial = true;
+        toast('Notion load interrupted ('+e.message+') — showing '+allEntries.length+' row(s) loaded so far. Click Refresh to retry.', 'w');
+        _renderAll();
+      } else {
+        // Nothing loaded at all (e.g. the very first page failed) — fall back
+        // to demo data so the cockpit isn't blank, but flag it clearly.
+        console.warn('Notion fetch failed, falling back to demo data:', e.message);
+        _loadDemoFallback = true;
+        allEntries = demoEntries();
+        _renderAll();
+        toast('Could not reach Notion ('+e.message+') — showing demo data. Click Refresh to retry.', 'e');
+      }
     }
   } else {
     allEntries = demoEntries();
@@ -1358,6 +1379,48 @@ function _renderAll(){
   renderBreakdown();
 }
 
+// Fetches a single page from the proxy, retrying transient failures (network
+// errors, 429 rate-limits, 5xx) with exponential backoff before giving up.
+// Non-retryable 4xx errors fail immediately since retrying won't help.
+async function _fetchNotionPage(proxy, payload, maxRetries){
+  maxRetries = maxRetries || 3;
+  let lastErr;
+  for(let attempt = 1; attempt <= maxRetries; attempt++){
+    let res;
+    try{
+      res = await fetch(proxy, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+    }catch(networkErr){
+      lastErr = networkErr; // network failure — always retryable
+      if(attempt < maxRetries){
+        const wait = 600 * Math.pow(2, attempt - 1);
+        console.warn(`[stream] network error (${networkErr.message}) — retrying in ${wait}ms (attempt ${attempt+1}/${maxRetries})`);
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
+      throw lastErr;
+    }
+
+    if(res.ok){
+      const data = await res.json();
+      if(data.results) return data;
+      throw new Error('Unexpected response shape');
+    }
+
+    const retryable = res.status === 429 || res.status >= 500;
+    lastErr = new Error('Proxy returned '+res.status);
+    if(!retryable || attempt >= maxRetries) throw lastErr;
+
+    const wait = 600 * Math.pow(2, attempt - 1);
+    console.warn(`[stream] proxy ${res.status} — retrying in ${wait}ms (attempt ${attempt+1}/${maxRetries})`);
+    await new Promise(r => setTimeout(r, wait));
+  }
+  throw lastErr;
+}
+
 // Streams pages from Notion one at a time, calling onPage(entries[]) after each.
 // Pages arrive newest-first (sorted by Date descending) so the UI is immediately useful.
 // gen: the load-generation token from loadData(); if _loadGen advances, this stream aborts.
@@ -1375,14 +1438,7 @@ async function streamNotionEntries(onPage, gen){
       page_size: 100,
     };
     if(startCursor) payload.start_cursor = startCursor;
-    const res = await fetch(proxy, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    });
-    if(!res.ok) throw new Error('Proxy returned '+res.status);
-    const data = await res.json();
-    if(!data.results) throw new Error('Unexpected response shape');
+    const data = await _fetchNotionPage(proxy, payload);
     if(_loadGen !== gen) { console.log('[stream] superseded after page', pageNum, '— discarding'); return; }
     onPage(data.results.map(mapNotionPage));
     hasMore = data.has_more || false;
@@ -1852,7 +1908,11 @@ function applyFilters(){
     if(pe&&e.person!==pe) return false;
     return true;
   }).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-  document.getElementById('fCount').textContent=filtered.length+' rows'+(allEntries.length!==filtered.length?' (filtered)':'')+(allEntries.length&&!document.getElementById('cfgProxy').value?' · demo':'');
+  let fCountSuffix = '';
+  if(_loadDemoFallback) fCountSuffix = ' · demo (Notion unreachable — click Refresh to retry)';
+  else if(_loadPartial) fCountSuffix = ' · partial load (click Refresh to retry)';
+  else if(allEntries.length && !document.getElementById('cfgProxy').value) fCountSuffix = ' · demo';
+  document.getElementById('fCount').textContent=filtered.length+' rows'+(allEntries.length!==filtered.length?' (filtered)':'')+fCountSuffix;
   const tbody=document.getElementById('logBody');
   if(!filtered.length){
     tbody.innerHTML='<tr><td colspan="11"><div class="empty">No entries match the current filters</div></td></tr>';
