@@ -67,6 +67,7 @@ exports.handler = async (event) => {
   // ── Read base64 XLSX (mirrors parse-xlsx.js input handling) ────────────────
   let base64Data, filename;
   const contentType = (event.headers['content-type'] || '').toLowerCase();
+  const forceRefresh = event.queryStringParameters?.force === '1';
 
   if (event.isBase64Encoded) {
     base64Data = event.body;
@@ -84,6 +85,13 @@ exports.handler = async (event) => {
     }
     base64Data = (body.data || '').replace(/\s+/g, '');
     filename = body.filename || event.queryStringParameters?.filename || 'file.xlsx';
+  }
+
+  // Manual cache-bust: ?force=1 (used by the UI's ↻ re-validate button) always
+  // rebuilds the Notion indices instead of reusing the warm-instance cache.
+  if (forceRefresh) {
+    _notionCache = null;
+    _notionCacheTs = 0;
   }
 
   if (!base64Data) return respond(400, { error: 'Missing file data' });
@@ -295,39 +303,49 @@ function notionHeaders(token) {
 // small databases. Eliminates extra Notion API round-trips per call.
 async function buildNameIndex(dbId, token) {
   const index = {};
-  const res = await fetch('https://api.notion.com/v1/databases/' + dbId + '/query', {
-    method: 'POST', headers: notionHeaders(token),
-    body: JSON.stringify({ page_size: 100 }),
-  });
-  if (!res.ok) return index;
-  const data = await res.json();
-  for (const page of (data.results || [])) {
-    const titleProp = Object.values(page.properties || {}).find(p => p.type === 'title');
-    const name = titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text;
-    if (name) index[name.trim()] = page.id;
-  }
+  let cursor;
+  do {
+    const payload = { page_size: 100 };
+    if (cursor) payload.start_cursor = cursor;
+    const res = await fetch('https://api.notion.com/v1/databases/' + dbId + '/query', {
+      method: 'POST', headers: notionHeaders(token), body: JSON.stringify(payload),
+    });
+    if (!res.ok) break;
+    const data = await res.json();
+    for (const page of (data.results || [])) {
+      const titleProp = Object.values(page.properties || {}).find(p => p.type === 'title');
+      const name = titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text;
+      if (name) index[name.trim()] = page.id;
+    }
+    cursor = data.has_more ? data.next_cursor : null;
+  } while (cursor);
   return index;
 }
 
 async function buildItemIndexWithProjects(dbId, token) {
   const items = [];
-  const res = await fetch('https://api.notion.com/v1/databases/' + dbId + '/query', {
-    method: 'POST', headers: notionHeaders(token),
-    body: JSON.stringify({ page_size: 100 }),
-  });
-  if (!res.ok) return items;
-  const data = await res.json();
-  for (const page of (data.results || [])) {
-    const titleProp = Object.values(page.properties || {}).find(p => p.type === 'title');
-    const name = titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text;
-    if (name) {
-      const projectIds = [];
-      Object.values(page.properties || {}).forEach(prop => {
-        if (prop.type === 'relation') (prop.relation || []).forEach(r => projectIds.push(r.id));
-      });
-      items.push({ name: name.trim(), id: page.id, projectIds });
+  let cursor;
+  do {
+    const payload = { page_size: 100 };
+    if (cursor) payload.start_cursor = cursor;
+    const res = await fetch('https://api.notion.com/v1/databases/' + dbId + '/query', {
+      method: 'POST', headers: notionHeaders(token), body: JSON.stringify(payload),
+    });
+    if (!res.ok) break;
+    const data = await res.json();
+    for (const page of (data.results || [])) {
+      const titleProp = Object.values(page.properties || {}).find(p => p.type === 'title');
+      const name = titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text;
+      if (name) {
+        const projectIds = [];
+        Object.values(page.properties || {}).forEach(prop => {
+          if (prop.type === 'relation') (prop.relation || []).forEach(r => projectIds.push(r.id));
+        });
+        items.push({ name: name.trim(), id: page.id, projectIds });
+      }
     }
-  }
+    cursor = data.has_more ? data.next_cursor : null;
+  } while (cursor);
   return items;
 }
 
