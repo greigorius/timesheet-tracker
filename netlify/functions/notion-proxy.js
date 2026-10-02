@@ -241,13 +241,21 @@ async function handleValidateRelations(body, token) {
   // to Notion at all. The caller (Scenario A) is responsible for blocking the
   // whole file when flagged_count > 0, not just when error_count > 0.
   return respond(200, {
-    valid_rows:      validRows,
-    error_rows:      errorRows,
-    flagged_rows:    flaggedRows,
-    valid_count:     validRows.length,
-    error_count:     errorRows.length,
-    flagged_count:   flaggedCount,
-    valid_rows_json: JSON.stringify(validRows),
+    valid_rows:        validRows,
+    error_rows:        errorRows,
+    flagged_rows:      flaggedRows,
+    valid_count:       validRows.length,
+    error_count:       errorRows.length,
+    flagged_count:     flaggedCount,
+    valid_rows_json:   JSON.stringify(validRows),
+    // Make's raw HTTP body templates cannot reliably serialise an
+    // array-of-collections embedded via {{variable}} — it renders as an
+    // empty string (for []) or as bare comma-separated objects with no
+    // enclosing brackets (for a populated array), producing invalid JSON
+    // in the scenario's WebhookRespond body. Pre-serialise here instead,
+    // same fix already applied to valid_rows_json above.
+    error_rows_json:   JSON.stringify(errorRows),
+    flagged_rows_json: JSON.stringify(flaggedRows),
   });
 }
 

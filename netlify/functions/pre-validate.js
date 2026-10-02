@@ -238,7 +238,7 @@ exports.handler = async (event) => {
 
   // ── Per-row validation ─────────────────────────────────────────────────────
   let blankClient = 0, blankProject = 0, blankItem = 0, badDate = 0;
-  let unresolvedClient = 0, unresolvedItem = 0;
+  let unresolvedClient = 0, unresolvedItem = 0, unresolvedProject = 0;
 
   const validatedRows = dataRows.map(row => {
     const issues = [];
@@ -262,6 +262,17 @@ exports.handler = async (event) => {
           issues.push('unresolved_item'); unresolvedItem++;
         }
       }
+      // Mirrors notion-proxy.js's validate-relations project check — a
+      // project name that doesn't resolve in the Projects database is a
+      // soft flag there too, and per the all-or-nothing import rule it
+      // blocks the whole file at import time. Previously missing here,
+      // so this badge could say "Valid" for a file Scenario A would
+      // still reject as flagged.
+      if (row.project && Object.keys(projectIdx).length > 0) {
+        if (!findInIndex(projectIdx, row.project, 'contains')) {
+          issues.push('unresolved_project'); unresolvedProject++;
+        }
+      }
     }
 
     return { ...row, issues };
@@ -269,7 +280,7 @@ exports.handler = async (event) => {
 
   const personNotFound = personResolved === false;
   const issueCount = blankClient + blankProject + blankItem + badDate
-                   + unresolvedClient + unresolvedItem
+                   + unresolvedClient + unresolvedItem + unresolvedProject
                    + (personNotFound ? 1 : 0)
                    + filenameIssues.length;
 
@@ -292,6 +303,7 @@ exports.handler = async (event) => {
       bad_date:          badDate,
       unresolved_client: unresolvedClient,
       unresolved_item:   unresolvedItem,
+      unresolved_project: unresolvedProject,
       person_not_found:  personNotFound,
     },
     rows: validatedRows,
