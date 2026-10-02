@@ -1026,15 +1026,23 @@ function renderFileList(raw){
   renderFileListUI();
   document.getElementById('step1num').className='step-num done';
 
-  // ── Validate every file live, staggered 2s apart ────────────────────────────
+  // ── Validate every file live, one at a time ─────────────────────────────────
+  // Deliberately sequential, not staggered-but-concurrent: firing every file's
+  // validate call in parallel spins up a separate cold Netlify function per
+  // file (none of them share the warm in-memory Notion cache), and a burst of
+  // ~20 concurrent cold calls routinely pushed past the window Make holds open
+  // for a synchronous webhook response — which is exactly what was producing
+  // "Validation service still starting up" on every single row. Awaiting each
+  // call before starting the next keeps one function instance warm (so every
+  // call after the first is fast) and never puts concurrent load on Make.
   if(cfg.validateUrl){
-    let delay=0;
-    scannedFiles.forEach(f=>{
-      if(!importedFileNames.has(f.name)){
-        setTimeout(()=>triggerValidationForFile(f), delay);
-        delay+=2000;
-      }
-    });
+    validateFilesSequentially(scannedFiles.filter(f=>!importedFileNames.has(f.name)));
+  }
+}
+
+async function validateFilesSequentially(files){
+  for(const f of files){
+    await triggerValidationForFile(f);
   }
 }
 
@@ -1054,9 +1062,11 @@ async function triggerValidationForFile(f,isRetry){
       // scenario is still running a cold Netlify function and hasn't sent its
       // real response yet — this is transient, not a real validation error.
       // Retry once after a short pause instead of surfacing a parse error.
+      // Awaited (not fire-and-forget) so the sequential queue above still
+      // waits for this file to resolve before starting the next one.
       if(!isRetry){
-        setTimeout(()=>triggerValidationForFile(f,true), 4000);
-        return;
+        await new Promise(r=>setTimeout(r,4000));
+        return triggerValidationForFile(f,true);
       }
       validationResults[f.name]={state:'err',issue_count:1,error:'Validation service still starting up — try again shortly'};
       renderFileListUI();
