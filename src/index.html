@@ -40,6 +40,14 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 .icon-btn{background:none;border:1px solid var(--border);color:var(--muted);cursor:pointer;padding:4px 8px;border-radius:3px;font-size:13px;line-height:1;transition:color .15s,border-color .15s}
 .icon-btn:hover{color:var(--text);border-color:var(--border2)}
 
+/* ── TAB NAV ── */
+.tab-nav{background:var(--surface);border-bottom:1px solid var(--border);padding:0 20px;display:flex;gap:4px;position:sticky;top:48px;z-index:99}
+.tab-btn{background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.04em;padding:11px 16px;cursor:pointer;transition:color .15s,border-color .15s}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{color:var(--blue-bright);border-bottom-color:var(--blue)}
+.tab-pane{display:none}
+.tab-pane.active{display:flex;flex-direction:column;gap:14px}
+
 /* ── LAYOUT ── */
 .main{padding:16px 20px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
 
@@ -447,6 +455,12 @@ td.dim{color:var(--muted)}
   </div>
 </header>
 
+<nav class="tab-nav">
+  <button class="tab-btn active" id="tabBtn-import" onclick="switchTab('import')">Import</button>
+  <button class="tab-btn" id="tabBtn-hourslog" onclick="switchTab('hourslog')">Hours Log</button>
+  <button class="tab-btn" id="tabBtn-overview" onclick="switchTab('overview')">Overview &amp; Export</button>
+</nav>
+
 <main class="main">
 
   <!-- ── WARN BANNER ── -->
@@ -454,6 +468,11 @@ td.dim{color:var(--muted)}
     <span>⚠</span><span>Configure your Make webhook URL and Notion connection to go live.</span>
     <button onclick="openSettings()">Configure</button>
   </div>
+
+  <!-- ══════════════════════════════════════════════
+       TAB: IMPORT
+  ══════════════════════════════════════════════ -->
+  <div class="tab-pane active" id="tabPane-import">
 
   <!-- ══════════════════════════════════════════════
        IMPORT TRIGGER
@@ -499,6 +518,14 @@ td.dim{color:var(--muted)}
 
     </div>
   </div>
+
+  </div>
+  <!-- /TAB: IMPORT -->
+
+  <!-- ══════════════════════════════════════════════
+       TAB: OVERVIEW & EXPORT
+  ══════════════════════════════════════════════ -->
+  <div class="tab-pane" id="tabPane-overview">
 
   <!-- ══════════════════════════════════════════════
        STATS
@@ -579,6 +606,14 @@ td.dim{color:var(--muted)}
     </div>
   </div>
 
+  </div>
+  <!-- /TAB: OVERVIEW & EXPORT -->
+
+  <!-- ══════════════════════════════════════════════
+       TAB: HOURS LOG
+  ══════════════════════════════════════════════ -->
+  <div class="tab-pane" id="tabPane-hourslog">
+
     <!-- ══════════════════════════════════════════════
        IMPORT LOG TABLE
   ══════════════════════════════════════════════ -->
@@ -629,6 +664,9 @@ td.dim{color:var(--muted)}
       </table>
     </div>
   </div>
+
+  </div>
+  <!-- /TAB: HOURS LOG -->
 
 </main>
 
@@ -792,6 +830,16 @@ function updateConnState(){
 }
 function openSettings(){document.getElementById('drw').classList.add('open');document.getElementById('ov').classList.add('open')}
 function closeSettings(){document.getElementById('drw').classList.remove('open');document.getElementById('ov').classList.remove('open')}
+
+// ─────────────────────────────────────────────────────────
+// TABS
+// ─────────────────────────────────────────────────────────
+function switchTab(name){
+  ['import','hourslog','overview'].forEach(t=>{
+    document.getElementById('tabPane-'+t).classList.toggle('active', t===name);
+    document.getElementById('tabBtn-'+t).classList.toggle('active', t===name);
+  });
+}
 
 // ─────────────────────────────────────────────────────────
 // CLOCK
