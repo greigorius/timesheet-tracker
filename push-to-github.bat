@@ -62,13 +62,17 @@ echo.
 echo  [git] Staging all changes...
 git add -A
 
-echo  [git] Committing: "%COMMIT_MSG%"
-git commit -m "%COMMIT_MSG%"
+:: Only commit if something is actually staged. Previously, a "nothing to
+:: commit" result from `git commit` was treated as fatal and the script
+:: exited before ever reaching `git push` -- so a commit made some other way
+:: (e.g. directly in the repo, or by a prior run) would sit locally forever
+:: and never reach GitHub. Now we just skip the commit step and still push.
+git diff --cached --quiet
 if errorlevel 1 (
-  echo.
-  echo  [info] Nothing new to commit.
-  pause
-  exit /b 0
+  echo  [git] Committing: "%COMMIT_MSG%"
+  git commit -m "%COMMIT_MSG%"
+) else (
+  echo  [info] Nothing new to stage -- checking for unpushed commits...
 )
 
 echo.

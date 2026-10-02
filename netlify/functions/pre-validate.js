@@ -179,13 +179,13 @@ exports.handler = async (event) => {
   const timesheetsDbId = process.env.NOTION_TIMESHEETS_DB;
   const projectsDbId   = process.env.NOTION_PROJECTS_DB;
 
-  let personIdx = {}, clientIdx = {}, itemIdx = [], projectIdx = {};
+  let personIdx = {}, clientIdx = {}, itemIdx = [], projectIdx = {}, personEmailIdx = {};
   let notionAvailable = false;
 
   const now = Date.now();
   if (_notionCache && (now - _notionCacheTs) < NOTION_CACHE_TTL_MS) {
     // Cache hit — reuse indices
-    ({ personIdx, clientIdx, itemIdx, projectIdx } = _notionCache);
+    ({ personIdx, clientIdx, itemIdx, projectIdx, personEmailIdx } = _notionCache);
     notionAvailable = true;
   } else if (timesheetsDbId) {
     try {
@@ -200,19 +200,21 @@ exports.handler = async (event) => {
         const clientDbId = p.Client && p.Client.relation && p.Client.relation.database_id;
         const itemDbId   = p.Item   && p.Item.relation   && p.Item.relation.database_id;
 
-        const [pi, ci, ii, pri] = await Promise.all([
+        const [pi, ci, ii, pri, pei] = await Promise.all([
           personDbId   ? buildNameIndex(personDbId, token)           : Promise.resolve({}),
           clientDbId   ? buildNameIndex(clientDbId, token)           : Promise.resolve({}),
           itemDbId     ? buildItemIndexWithProjects(itemDbId, token) : Promise.resolve([]),
           projectsDbId ? buildNameIndex(projectsDbId, token)        : Promise.resolve({}),
+          personDbId   ? buildPersonEmailIndex(personDbId, token)    : Promise.resolve({}),
         ]);
         personIdx  = pi;
         clientIdx  = ci;
         itemIdx    = ii;
         projectIdx = pri;
+        personEmailIdx = pei;
         notionAvailable = true;
         // Store in module-level cache
-        _notionCache = { personIdx, clientIdx, itemIdx, projectIdx };
+        _notionCache = { personIdx, clientIdx, itemIdx, projectIdx, personEmailIdx };
         _notionCacheTs = Date.now();
       }
     } catch {
@@ -223,8 +225,15 @@ exports.handler = async (event) => {
   // ── Person check ───────────────────────────────────────────────────────────
   const personLookup = NAME_ALIASES[(person || '').toLowerCase()] || person;
   let personResolved = null;
+  let personEmail = null;
   if (notionAvailable && personLookup) {
     personResolved = !!findInIndex(personIdx, personLookup, 'exact');
+    if (personResolved) {
+      const matchKey = Object.keys(personEmailIdx).find(
+        k => k.toLowerCase() === personLookup.toLowerCase()
+      );
+      personEmail = matchKey ? personEmailIdx[matchKey] : null;
+    }
   }
 
   // ── Per-row validation ─────────────────────────────────────────────────────
@@ -270,6 +279,8 @@ exports.handler = async (event) => {
     filename_issues: filenameIssues,
     person,
     person_resolved: personResolved,
+    person_email: personEmail,
+    person_first_name: (person || '').trim().split(/\s+/)[0] || '',
     notion_available: notionAvailable,
     week_commencing: weekCommencing,
     total_rows:  dataRows.length,
@@ -347,6 +358,33 @@ async function buildItemIndexWithProjects(dbId, token) {
     cursor = data.has_more ? data.next_cursor : null;
   } while (cursor);
   return items;
+}
+
+// Name -> Email map for the Person database (used to populate the "email
+// the timesheet author" button in the UI). Separate from buildNameIndex
+// because that one only captures the title property, not Email.
+async function buildPersonEmailIndex(dbId, token) {
+  const index = {};
+  let cursor;
+  do {
+    const payload = { page_size: 100 };
+    if (cursor) payload.start_cursor = cursor;
+    const res = await fetch('https://api.notion.com/v1/databases/' + dbId + '/query', {
+      method: 'POST', headers: notionHeaders(token), body: JSON.stringify(payload),
+    });
+    if (!res.ok) break;
+    const data = await res.json();
+    for (const page of (data.results || [])) {
+      const props = page.properties || {};
+      const titleProp = Object.values(props).find(p => p.type === 'title');
+      const name = titleProp && titleProp.title && titleProp.title[0] && titleProp.title[0].plain_text;
+      const emailProp = props.Email;
+      const email = emailProp && (emailProp.email || (emailProp.rich_text && emailProp.rich_text[0] && emailProp.rich_text[0].plain_text));
+      if (name && email) index[name.trim()] = email;
+    }
+    cursor = data.has_more ? data.next_cursor : null;
+  } while (cursor);
+  return index;
 }
 
 function itemCodePrefix(name) {

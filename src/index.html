@@ -378,6 +378,10 @@ td.dim{color:var(--muted)}
 .file-row.in-queue:hover{border-color:var(--border)}
 .reval-btn{background:none;border:1px solid var(--border2);color:var(--dim);font-size:10px;padding:1px 6px;border-radius:2px;cursor:pointer;flex-shrink:0;line-height:1.6;transition:color .15s,border-color .15s}
 .reval-btn:hover{color:var(--text);border-color:var(--blue)}
+.val-detail-toolbar{display:flex;justify-content:flex-end;margin-bottom:4px}
+.email-author-btn{background:none;border:1px solid var(--border2);color:var(--blue-bright);font-size:10px;padding:2px 8px;border-radius:2px;cursor:pointer;font-family:var(--mono);flex-shrink:0;white-space:nowrap;line-height:1.6;transition:all .15s}
+.email-author-btn:hover{color:var(--text);border-color:var(--blue);background:var(--blue-dim)}
+.email-author-btn[disabled]{color:var(--dim);border-color:var(--border);cursor:default;opacity:.5}
 
 /* ── CHART FILTER BAR ── */
 .cv-fbar{display:flex;gap:8px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--border);background:var(--surface2);flex-wrap:wrap}
@@ -1018,6 +1022,31 @@ function toggleValDetail(idx){
   if(el) el.classList.toggle('show');
 }
 
+const DKH_REFERENCE_URL='https://dkh-timesheet-tracker.netlify.app/reference';
+
+function emailTimesheetAuthor(filename){
+  const vr=validationResults[filename];
+  if(!vr||!vr.person_email){ toast(filename+': no email on file for this person','w'); return; }
+
+  const wkMatch=filename.match(/W(\d{1,2})/i);
+  const wk=wkMatch?wkMatch[1]:'?';
+  const firstName=vr.person_first_name||(vr.person||'').split(/\s+/)[0]||'there';
+  const issues=vr._issueTexts&&vr._issueTexts.length
+    ? vr._issueTexts.map(t=>'- '+t).join('\n')
+    : '- (see the import pipeline for details)';
+
+  const subject=`Timesheet issues for W${wk}`;
+  const body=`Hi ${firstName}\n\n`
+    + `Please address the following issues with the timesheet: ${filename} and resave into the Inbox.\n\n`
+    + `${issues}\n\n`
+    + `Use the link: DKH reference — ${DKH_REFERENCE_URL}`;
+
+  const mailto=`mailto:${encodeURIComponent(vr.person_email)}`
+    + `?subject=${encodeURIComponent(subject)}`
+    + `&body=${encodeURIComponent(body)}`;
+  window.location.href=mailto;
+}
+
 function renderFileListUI(){
   const list=document.getElementById('fileList');
   const visibleFiles=scannedFiles.filter(f=>!importedFileNames.has(f.name));
@@ -1061,14 +1090,17 @@ function renderFileListUI(){
     // ── Validation detail panel ─────────────────────────────────────────────
     let detail='';
     if(vr&&(vr.state==='warn'||vr.state==='err')){
-      const issueLines=[];
+      // Build a single list of {cls,text} issue items, then derive both the
+      // HTML panel and the plain-text email body from it so the two can
+      // never drift out of sync.
+      const issueItems=[];
       // Filename issues
       if(vr.filename_issues&&vr.filename_issues.length>0){
-        vr.filename_issues.forEach(msg=>issueLines.push(`<div class="val-issue vi-warn">Filename: ${esc(msg)}</div>`));
+        vr.filename_issues.forEach(msg=>issueItems.push({cls:'vi-warn',text:`Filename: ${msg}`}));
       }
       // Person not found (hard error)
       if(vr.issues&&vr.issues.person_not_found){
-        issueLines.push(`<div class="val-issue vi-err">Person "${esc(vr.person||'')}" not in Notion People — add them first</div>`);
+        issueItems.push({cls:'vi-err',text:`Person "${vr.person||''}" not in Notion People — add them first`});
       }
       // Per-row issues (deduplicated by type)
       if(Array.isArray(vr.rows)){
@@ -1093,19 +1125,23 @@ function renderFileListUI(){
           const rows=rowNums.length===1?`row ${rowNums[0]}`:
                      rowNums.length<=4?`rows ${rowNums.join(', ')}`:
                      `rows ${rowNums[0]}–${rowNums[rowNums.length-1]} (${rowNums.length})`;
-          issueLines.push(`<div class="val-issue vi-warn">${esc(label)} — ${rows}</div>`);
+          issueItems.push({cls:'vi-warn',text:`${label} — ${rows}`});
         });
       }
       // Notion unavailable note
-      if(vr.notion_available===false&&issueLines.length===0){
-        issueLines.push(`<div class="val-issue vi-warn">Notion unavailable — only structural checks ran</div>`);
+      if(vr.notion_available===false&&issueItems.length===0){
+        issueItems.push({cls:'vi-warn',text:'Notion unavailable — only structural checks ran'});
       }
       // Generic error fallback (HTTP error, network error, etc.)
-      if(issueLines.length===0){
-        const msg=vr.error?esc(vr.error):'Validation error — check browser console';
-        issueLines.push(`<div class="val-issue vi-err">${msg}</div>`);
+      if(issueItems.length===0){
+        issueItems.push({cls:'vi-err',text:vr.error||'Validation error — check browser console'});
       }
-      detail=`<div class="val-detail" id="vd-${i}">${issueLines.join('')}</div>`;
+      const issueLines=issueItems.map(it=>`<div class="val-issue ${it.cls}">${esc(it.text)}</div>`);
+      vr._issueTexts=issueItems.map(it=>it.text); // stashed for the email button
+
+      const canEmail=!!vr.person_email;
+      const toolbar=`<div class="val-detail-toolbar"><button class="email-author-btn" ${canEmail?'':'disabled'} onclick="event.stopPropagation();emailTimesheetAuthor('${esc(f.name)}')" title="${canEmail?'Email '+esc(vr.person||'the author')+' about these issues':'No email on file for '+esc(vr.person||'this person')}">✉ Email ${canEmail?esc(vr.person_first_name||'author'):'author'}</button></div>`;
+      detail=`<div class="val-detail" id="vd-${i}">${toolbar}${issueLines.join('')}</div>`;
     }
 
     return `<div class="file-row${inQueue?' in-queue':''}" onclick="${inQueue?'':'addToQueue(scannedFiles['+i+'])'}">
