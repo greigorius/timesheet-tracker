@@ -2064,8 +2064,15 @@ function renderBreakdown(){
     isVar ? tree[client].projects[project].items[item].v+=hrs : tree[client].projects[project].items[item].c+=hrs;
   });
 
-  // Max total for bar scaling
+  // Max total for bar scaling. Square-root scaling (rather than linear) is used
+  // deliberately: with a long-tail dataset (one client/project can be an order
+  // of magnitude bigger than the rest), a linear scale flattens every smaller
+  // bar to an unreadable sliver. Square-root compresses the gap while keeping
+  // bars monotonically ordered by hours — bigger is still always longer — so
+  // relative comparisons among the smaller entries stay visible at a glance.
+  // The exact figures are still shown as text alongside each bar regardless.
   const maxTotal = Math.max(...Object.values(tree).map(cl=>cl.c+cl.v), 1);
+  const maxTotalSqrt = Math.sqrt(maxTotal) || 1;
 
   const mkSplit = (c,v) => {
     const parts = [];
@@ -2074,7 +2081,7 @@ function renderBreakdown(){
     return parts.join(' ');
   };
   const mkBar = (c,v,total) => {
-    const pct = Math.max((total/maxTotal)*100, 0.5);
+    const pct = Math.max((Math.sqrt(total)/maxTotalSqrt)*100, 0.5);
     const cf = c || 0.001, vf = v || 0.001;
     return `<div class="bd-bar-wrap"><div class="bd-bar" style="width:${pct.toFixed(1)}%">
       <div class="bd-seg contracted" style="flex:${cf}"></div>
