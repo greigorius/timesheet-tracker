@@ -1056,18 +1056,31 @@ function renderFileList(raw){
   }
 }
 
-async function triggerValidationForFile(f){
+async function triggerValidationForFile(f,isRetry){
   if(!cfg.validateUrl||importedFileNames.has(f.name)) return;
-  validationResults[f.name]={state:'checking'};
-  renderFileListUI();
+  if(!isRetry){ validationResults[f.name]={state:'checking'}; renderFileListUI(); }
   try{
     const res=await fetch(cfg.validateUrl,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({filename:f.name,folder:f.folder||'Inbox'})
     });
+    const raw=await res.text();
+    let data;
+    try{ data=JSON.parse(raw); }catch{
+      // Make's webhook gateway falls back to a plain "Accepted" ack when the
+      // scenario is still running a cold Netlify function and hasn't sent its
+      // real response yet — this is transient, not a real validation error.
+      // Retry once after a short pause instead of surfacing a parse error.
+      if(!isRetry){
+        setTimeout(()=>triggerValidationForFile(f,true), 4000);
+        return;
+      }
+      validationResults[f.name]={state:'err',issue_count:1,error:'Validation service still starting up — try again shortly'};
+      renderFileListUI();
+      return;
+    }
     if(res.ok){
-      const data=await res.json();
       const personErr=data.issues&&data.issues.person_not_found;
       const state=personErr?'err':(data.issue_count>0?'warn':'ok');
       validationResults[f.name]={state,...data};
@@ -1084,14 +1097,6 @@ async function triggerValidationForFile(f){
     saveValCache(c);
   }
   renderFileListUI();
-}
-
-function revalidateFile(filename){
-  // Clear cache for this file (all modified-date variants)
-  purgeValCache(filename);
-  delete validationResults[filename];
-  const f=scannedFiles.find(sf=>sf.name===filename);
-  if(f) triggerValidationForFile(f);
 }
 
 function toggleValDetail(idx){
@@ -1166,7 +1171,7 @@ function renderFileListUI(){
       const n=vr.issue_count||1;
       const cls=vr.state==='err'?'err':'warn';
       const icon=vr.state==='err'?'✗':'⚠';
-      badge=`<span class="compat-badge ${cls}" style="cursor:pointer" onclick="event.stopPropagation();toggleValDetail(${i})" title="Click to see issues">${icon} ${n} issue${n===1?'':'s'} ▾</span><button class="reval-btn" onclick="event.stopPropagation();revalidateFile('${esc(f.name)}')" title="Re-validate this file">↻</button>`;
+      badge=`<span class="compat-badge ${cls}" style="cursor:pointer" onclick="event.stopPropagation();toggleValDetail(${i})" title="Click to see issues">${icon} ${n} issue${n===1?'':'s'} ▾</span>`;
     } else {
       badge=`<span class="compat-badge err">✗ Error</span>`;
     }
