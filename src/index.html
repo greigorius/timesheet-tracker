@@ -1107,7 +1107,10 @@ function emailTimesheetAuthor(filename){
   const body=`Hi ${firstName}\n\n`
     + `Please address the following issues with the timesheet: ${filename} and resave into the Inbox.\n\n`
     + `${issues}\n\n`
-    + `Use the link: DKH reference — ${DKH_REFERENCE_URL}`;
+    + `DKH reference: ${DKH_REFERENCE_URL}\n\n`
+    + `Make sure you have read through the instruction sheet on the first tab of the timesheet template you are using.\n\n`
+    + `Thank you!\n\n`
+    + `DKH Admin Team`;
 
   const mailto=`mailto:${encodeURIComponent(vr.person_email)}`
     + `?subject=${encodeURIComponent(subject)}`
