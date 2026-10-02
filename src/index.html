@@ -1003,16 +1003,6 @@ let scannedFiles=[];
 let importedFileNames=new Set(); // files successfully imported this session — hidden from Col 1
 let validationResults={}; // filename → {state:'none'|'checking'|'ok'|'warn'|'err', ...data}
 
-// ── Validation localStorage cache ─────────────────────────────────────────────
-// Key: filename + modified timestamp so a re-uploaded file auto-invalidates.
-// Survives page refresh; user can force re-check per file via the ↻ button.
-const VAL_CACHE_KEY='adl_valcache';
-const VAL_CACHE_MAX_AGE_MS=7*24*60*60*1000; // 7 days
-function loadValCache(){try{return JSON.parse(localStorage.getItem(VAL_CACHE_KEY)||'{}');}catch{return{};}}
-function saveValCache(c){try{localStorage.setItem(VAL_CACHE_KEY,JSON.stringify(c));}catch{}}
-function valCacheKey(f){return f.name+'__'+(f.modified||'');}
-function purgeValCache(filename){const c=loadValCache();Object.keys(c).forEach(k=>{if(k.startsWith(filename+'__'))delete c[k];});saveValCache(c);}
-
 function renderFileList(raw){
   // Normalise whatever Make sends: unwrap {files:[]} / {items:[]}, drop null/nameless entries.
   // Scenario B also returns a separate `needsReview` array (files Scenario C has
@@ -1025,30 +1015,22 @@ function renderFileList(raw){
   const reviewFiles=reviewArr.filter(f=>f&&f.name).map(f=>Object.assign({},f,{folder:'Needs Review'}));
   scannedFiles=inboxFiles.concat(reviewFiles);
   importedFileNames=new Set(); // reset on rescan — Dropbox list is fresh
-  validationResults={};        // reset in-memory; will be repopulated from cache below
+  // Every scan re-validates every file live — no cross-scan caching. A cached
+  // "last known" badge was proving misleading (it could show a verdict from
+  // before a file was corrected, moved, or re-checked), so freshness now wins
+  // over speed: what you see after a scan is always this scan's real result.
+  validationResults={};
   const addAllBtn=document.getElementById('addAllBtn');
   if(addAllBtn) addAllBtn.style.display=inboxFiles.length?'':'none';
-
-  // ── Restore cached validation results ───────────────────────────────────────
-  if(cfg.validateUrl){
-    const valCache=loadValCache();
-    const now=Date.now();
-    scannedFiles.forEach(f=>{
-      const cached=valCache[valCacheKey(f)];
-      if(cached&&(now-cached.cachedAt)<VAL_CACHE_MAX_AGE_MS){
-        validationResults[f.name]=cached;
-      }
-    });
-  }
 
   renderFileListUI();
   document.getElementById('step1num').className='step-num done';
 
-  // ── Validate only files without a cached result, staggered 2s apart ─────────
+  // ── Validate every file live, staggered 2s apart ────────────────────────────
   if(cfg.validateUrl){
     let delay=0;
     scannedFiles.forEach(f=>{
-      if(!importedFileNames.has(f.name)&&!validationResults[f.name]){
+      if(!importedFileNames.has(f.name)){
         setTimeout(()=>triggerValidationForFile(f), delay);
         delay+=2000;
       }
@@ -1089,12 +1071,6 @@ async function triggerValidationForFile(f,isRetry){
     }
   }catch(e){
     validationResults[f.name]={state:'err',issue_count:1,error:e.message};
-  }
-  // Persist to localStorage (only cache ok/warn/err — not transient 'checking')
-  if(validationResults[f.name]&&validationResults[f.name].state!=='checking'){
-    const c=loadValCache();
-    c[valCacheKey(f)]={...validationResults[f.name],cachedAt:Date.now()};
-    saveValCache(c);
   }
   renderFileListUI();
 }
@@ -1401,7 +1377,6 @@ async function startImport(){
         qItem.status='imported';
         qItem.detail='Imported successfully';
         importedFileNames.add(qItem.name); // remove from Col 1 file list
-        purgeValCache(qItem.name);          // no need to keep validation cache for imported file
         toast(qItem.name+': imported ✓','s');
       } else {
         // 200 OK but no recognised success status — Make-level error or misconfigured scenario
