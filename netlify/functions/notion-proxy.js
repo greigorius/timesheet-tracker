@@ -232,11 +232,18 @@ async function handleValidateRelations(body, token) {
     }
   }
 
-  const flaggedCount = validRows.filter(r => r.import_status === 'Flagged').length;
+  const flaggedRows  = validRows.filter(r => r.import_status === 'Flagged');
+  const flaggedCount = flaggedRows.length;
 
+  // NOTE: a flagged row is NOT a hard error (it still has a resolvable Person,
+  // just an unresolved Client/Project/Item), but per the house rule a
+  // timesheet with ANY issue — hard error or soft flag — must not be written
+  // to Notion at all. The caller (Scenario A) is responsible for blocking the
+  // whole file when flagged_count > 0, not just when error_count > 0.
   return respond(200, {
     valid_rows:      validRows,
     error_rows:      errorRows,
+    flagged_rows:    flaggedRows,
     valid_count:     validRows.length,
     error_count:     errorRows.length,
     flagged_count:   flaggedCount,

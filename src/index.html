@@ -148,7 +148,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:
 .prog-bar.done{background:linear-gradient(90deg,var(--green) 0%,#34D399 100%)}
 
 /* ── STATS BAR ── */
+/* Persistent strip housing the stats-bar, sitting above the tab nav so key
+   metrics stay visible regardless of which tab is active. */
+.stats-strip{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 20px;flex-shrink:0}
 .stats-bar{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:4px;overflow:hidden}
+.stats-bar.stats-bar-flat{border:none;border-radius:0}
 .stat{background:var(--surface);padding:12px 14px;display:flex;flex-direction:column;gap:3px}
 .stat-lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
 .stat-val{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--text);line-height:1}
@@ -466,6 +470,19 @@ td.dim{color:var(--muted)}
   </div>
 </header>
 
+<!-- ══════════════════════════════════════════════
+     KEY METRICS — persistent across all tabs
+══════════════════════════════════════════════ -->
+<div class="stats-strip">
+  <div class="stats-bar stats-bar-flat">
+    <div class="stat"><div class="stat-lbl">Total Hours</div><div class="stat-val blue" id="sHours">—</div><div class="stat-sub" id="sHoursSub">this period</div></div>
+    <div class="stat"><div class="stat-lbl">Entries</div><div class="stat-val" id="sEntries">—</div><div class="stat-sub">rows</div></div>
+    <div class="stat"><div class="stat-lbl">Flagged</div><div class="stat-val amber" id="sFlagged">—</div><div class="stat-sub">need review</div></div>
+    <div class="stat"><div class="stat-lbl">People</div><div class="stat-val" id="sPeople">—</div><div class="stat-sub">DTs active</div></div>
+    <div class="stat"><div class="stat-lbl">Projects</div><div class="stat-val" id="sProjects">—</div><div class="stat-sub">in period</div></div>
+  </div>
+</div>
+
 <nav class="tab-nav">
   <button class="tab-btn active" id="tabBtn-import" onclick="switchTab('import')">Import</button>
   <button class="tab-btn" id="tabBtn-hourslog" onclick="switchTab('hourslog')">Hours Log</button>
@@ -539,17 +556,6 @@ td.dim{color:var(--muted)}
   <div class="tab-pane" id="tabPane-overview">
 
   <div class="ov-scroll" id="ovScroll">
-
-  <!-- ══════════════════════════════════════════════
-       STATS
-  ══════════════════════════════════════════════ -->
-  <div class="stats-bar">
-    <div class="stat"><div class="stat-lbl">Total Hours</div><div class="stat-val blue" id="sHours">—</div><div class="stat-sub" id="sHoursSub">this period</div></div>
-    <div class="stat"><div class="stat-lbl">Entries</div><div class="stat-val" id="sEntries">—</div><div class="stat-sub">rows</div></div>
-    <div class="stat"><div class="stat-lbl">Flagged</div><div class="stat-val amber" id="sFlagged">—</div><div class="stat-sub">need review</div></div>
-    <div class="stat"><div class="stat-lbl">People</div><div class="stat-val" id="sPeople">—</div><div class="stat-sub">DTs active</div></div>
-    <div class="stat"><div class="stat-lbl">Projects</div><div class="stat-val" id="sProjects">—</div><div class="stat-sub">in period</div></div>
-  </div>
 
   <!-- ══════════════════════════════════════════════
        HOURS BREAKDOWN
@@ -1008,13 +1014,20 @@ function valCacheKey(f){return f.name+'__'+(f.modified||'');}
 function purgeValCache(filename){const c=loadValCache();Object.keys(c).forEach(k=>{if(k.startsWith(filename+'__'))delete c[k];});saveValCache(c);}
 
 function renderFileList(raw){
-  // Normalise whatever Make sends: unwrap {files:[]} / {items:[]}, drop null/nameless entries
-  const arr=Array.isArray(raw)?raw:(raw&&Array.isArray(raw.files)?raw.files:Array.isArray(raw.items)?raw.items:[]);
-  scannedFiles=arr.filter(f=>f&&f.name);
+  // Normalise whatever Make sends: unwrap {files:[]} / {items:[]}, drop null/nameless entries.
+  // Scenario B also returns a separate `needsReview` array (files Scenario C has
+  // already relocated out of Inbox because they failed validation) — tag each
+  // side so later validation calls fetch from the right Dropbox folder and the
+  // UI can group them under their own section.
+  const inboxArr=Array.isArray(raw)?raw:(raw&&Array.isArray(raw.files)?raw.files:Array.isArray(raw.items)?raw.items:[]);
+  const reviewArr=(raw&&Array.isArray(raw.needsReview))?raw.needsReview:[];
+  const inboxFiles=inboxArr.filter(f=>f&&f.name).map(f=>Object.assign({},f,{folder:'Inbox'}));
+  const reviewFiles=reviewArr.filter(f=>f&&f.name).map(f=>Object.assign({},f,{folder:'Needs Review'}));
+  scannedFiles=inboxFiles.concat(reviewFiles);
   importedFileNames=new Set(); // reset on rescan — Dropbox list is fresh
   validationResults={};        // reset in-memory; will be repopulated from cache below
   const addAllBtn=document.getElementById('addAllBtn');
-  if(addAllBtn) addAllBtn.style.display=scannedFiles.length?'':'none';
+  if(addAllBtn) addAllBtn.style.display=inboxFiles.length?'':'none';
 
   // ── Restore cached validation results ───────────────────────────────────────
   if(cfg.validateUrl){
@@ -1051,7 +1064,7 @@ async function triggerValidationForFile(f){
     const res=await fetch(cfg.validateUrl,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({filename:f.name})
+      body:JSON.stringify({filename:f.name,folder:f.folder||'Inbox'})
     });
     if(res.ok){
       const data=await res.json();
@@ -1119,8 +1132,15 @@ function renderFileListUI(){
     list.innerHTML='<div class="empty" style="padding:16px;color:var(--muted)">'+msg+'</div>';
     return;
   }
-  list.innerHTML=scannedFiles.map((f,i)=>{
+  const rowsHtml=scannedFiles.map((f,i)=>{
     if(importedFileNames.has(f.name)) return '';
+    const vr0=validationResults[f.name];
+    // A file belongs in Needs Review either because Scenario C has already
+    // relocated it there, or (briefly, before that relocation lands) because
+    // its own validation just came back with issues. Either way it can't be
+    // queued for import — per the house rule, timesheets with issues are
+    // blocked outright, not partially imported.
+    const inReview=f.folder==='Needs Review'||(vr0&&(vr0.state==='warn'||vr0.state==='err'));
     const inQueue=!!importQueue.find(q=>q.name===f.name);
 
     // ── Validation badge ────────────────────────────────────────────────────
@@ -1208,14 +1228,32 @@ function renderFileListUI(){
       detail=`<div class="val-detail" id="vd-${i}">${toolbar}${issueLines.join('')}</div>`;
     }
 
-    return `<div class="file-row${inQueue?' in-queue':''}" onclick="${inQueue?'':'addToQueue(scannedFiles['+i+'])'}">
+    const rowClick=(inQueue||inReview)?'':'addToQueue(scannedFiles['+i+'])';
+    const actionBtn=inReview
+      ? `<span class="file-meta" style="color:var(--amber)">Resave to Inbox to re-check</span>`
+      : `<button class="file-add-btn${inQueue?' added':''}" onclick="event.stopPropagation();${inQueue?'':'addToQueue(scannedFiles['+i+'])'}" ${inQueue?'disabled':''}>${inQueue?'Queued':'+ Queue'}</button>`;
+
+    const html=`<div class="file-row${inQueue?' in-queue':''}" onclick="${rowClick}">
       <span class="file-name" title="${esc(f.name)}">${esc(f.name)}</span>
       <span class="file-meta">${esc(f.size||'')}${f.size&&f.modified?' · ':''}${esc(f.modified||'')}</span>
       ${badge}
-      <button class="file-add-btn${inQueue?' added':''}" onclick="event.stopPropagation();${inQueue?'':'addToQueue(scannedFiles['+i+'])'}" ${inQueue?'disabled':''}>${inQueue?'Queued':'+ Queue'}</button>
+      ${actionBtn}
       ${detail}
     </div>`;
-  }).join('');
+    return {html,inReview};
+  }).filter(Boolean);
+
+  const readyRows=rowsHtml.filter(r=>!r.inReview).map(r=>r.html);
+  const reviewRows=rowsHtml.filter(r=>r.inReview).map(r=>r.html);
+
+  let out='';
+  if(readyRows.length){
+    out+=`<div class="sdiv" style="margin:4px 0">✓ Ready for Import</div>`+readyRows.join('');
+  }
+  if(reviewRows.length){
+    out+=`<div class="sdiv" style="margin:10px 0 4px">⚠ Needs Review</div>`+reviewRows.join('');
+  }
+  list.innerHTML=out||'<div class="empty" style="padding:16px;color:var(--muted)">No files.</div>';
 }
 
 // ─────────────────────────────────────────────────────────
@@ -1233,7 +1271,7 @@ function addToQueue(file){
 }
 
 function addAllToQueue(){
-  scannedFiles.forEach(f=>{
+  scannedFiles.filter(f=>f.folder!=='Needs Review').forEach(f=>{
     if(!importQueue.find(q=>q.name===f.name))
       importQueue.push({name:f.name,size:f.size||'',modified:f.modified||'',status:'pending',detail:''});
   });
