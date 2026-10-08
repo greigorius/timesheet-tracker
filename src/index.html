@@ -1064,9 +1064,12 @@ async function triggerValidationForFile(f,isRetry){
       // Retry once after a short pause instead of surfacing a parse error.
       // Awaited (not fire-and-forget) so the sequential queue above still
       // waits for this file to resolve before starting the next one.
-      if(!isRetry){
-        await new Promise(r=>setTimeout(r,4000));
-        return triggerValidationForFile(f,true);
+      // Up to 3 retries with growing back-off (4s, 8s, 12s) — a cold
+      // Netlify/Make start can take 15s+, longer than a single 4s retry.
+      const attempt=(typeof isRetry==='number')?isRetry:(isRetry?1:0);
+      if(attempt<3){
+        await new Promise(r=>setTimeout(r,4000*(attempt+1)));
+        return triggerValidationForFile(f,attempt+1);
       }
       validationResults[f.name]={state:'err',issue_count:1,error:'Validation service still starting up — try again shortly'};
       renderFileListUI();
