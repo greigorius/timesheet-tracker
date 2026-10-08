@@ -60,6 +60,62 @@ Output format — return ONLY a raw JSON array, no markdown fences, no explanati
   }
 ]`;
 
+function parseCsvText(text) {
+  const out = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+      else if (c === '"') q = false;
+      else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell); cell = ''; out.push(row); row = [];
+    } else cell += c;
+  }
+  if (cell !== '' || row.length) { row.push(cell); out.push(row); }
+  return out;
+}
+
+// Returns an array of normalised rows, or null if the layout isn't recognised.
+function parseCsvDeterministic(csv, person, weekCommencing) {
+  const table = parseCsvText(csv);
+  if (table.length < 1) return null;
+  const hdr = table[0].map((h) => h.trim().toLowerCase());
+  const idx = (re) => hdr.findIndex((h) => re.test(h));
+  const cDay = idx(/^day$/), cDate = idx(/^date$/), cClient = idx(/^client$/),
+        cProj = idx(/^project/), cItem = idx(/^item/), cCat = idx(/^category$/),
+        cVar = idx(/^variation/), cDesc = idx(/^description$/), cHrs = idx(/^hours$/);
+  if ([cDate, cClient, cProj, cItem, cDesc, cHrs].some((i) => i < 0)) return null;
+
+  const val = (r, i) => (i >= 0 && r[i] != null && String(r[i]).trim() !== '' ? String(r[i]).trim() : null);
+  const rows = [];
+  for (const r of table.slice(1)) {
+    const hours = parseFloat(val(r, cHrs));
+    if (!isFinite(hours) || hours <= 0) continue;
+    const date = val(r, cDate), desc = val(r, cDesc);
+    if (!date && !desc) continue;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null; // let the LLM handle odd date formats
+    const v = (val(r, cVar) || 'N').toUpperCase();
+    rows.push({
+      date,
+      day: val(r, cDay),
+      client: val(r, cClient),
+      project: val(r, cProj),
+      item_no: val(r, cItem),
+      category: val(r, cCat),
+      variation: v === 'Y' || v === 'YES' ? 'Y' : 'N',
+      description: desc,
+      hours,
+      person: person || null,
+      week_commencing: weekCommencing || null,
+    });
+  }
+  return rows.length ? rows : null;
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 204, headers: corsHeaders(), body: '' };
@@ -97,6 +153,21 @@ exports.handler = async (event) => {
   if (!csv) {
     return respond(400, { error: 'Missing required field: csv or csv_b64' });
   }
+
+  // ── Fast path: deterministic CSV parse ────────────────────────────────────
+  // The CSV comes from parse-xlsx in a fixed, known layout, so no LLM is
+  // needed. Calling Claude to re-emit every row as JSON took 30s+ for a full
+  // week (35+ rows), blowing Netlify's 26s function limit (504 Gateway
+  // Timeout → HTTP 500 in the cockpit). Falls through to the LLM only if the
+  // layout is unrecognised or a date is not already ISO.
+  try {
+    const det = parseCsvDeterministic(csv, person, week_commencing);
+    if (det) {
+      const rows_json = JSON.stringify(det);
+      const rows_b64 = Buffer.from(rows_json).toString('base64');
+      return respond(200, { rows: det, rows_json, rows_b64, count: det.length, parsed_by: 'deterministic' });
+    }
+  } catch { /* fall through to LLM */ }
 
   // Build the user message — Node.js handles JSON.stringify escaping correctly
   const userMessage = [
