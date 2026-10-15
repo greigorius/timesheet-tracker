@@ -301,6 +301,7 @@ td.dim{color:var(--muted)}
 .fbar{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--surface2);flex-wrap:wrap}
 .fsel{background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:4px 8px;border-radius:2px;outline:none;cursor:pointer}
 .fsel:focus{border-color:var(--blue)}
+.fsel:disabled{opacity:.4;cursor:not-allowed}
 .fsep{flex:1}
 .fcount{font-family:var(--mono);font-size:10px;color:var(--dim)}
 
@@ -617,6 +618,9 @@ td.dim{color:var(--muted)}
       </select>
       <select class="fsel" id="chartProjectFilter" onchange="onChartFilterChange()">
         <option value="">All projects</option>
+      </select>
+      <select class="fsel" id="chartItemFilter" onchange="renderView()" disabled title="Select a project to filter by item">
+        <option value="">All items</option>
       </select>
       <div class="fsep"></div>
     </div>
@@ -1691,6 +1695,7 @@ function populateFilters(){
   vPers.innerHTML='<option value="">All people</option>'+people.map(p=>'<option>'+esc(p)+'</option>').join('');
   if(cCli) cCli.innerHTML='<option value="">All clients</option>'+clients.map(c=>'<option>'+esc(c)+'</option>').join('');
   if(cProj) cProj.innerHTML='<option value="">All projects</option>'+projects.map(p=>'<option>'+esc(p)+'</option>').join('');
+  refreshChartItemFilter();
 }
 
 // ─────────────────────────────────────────────────────────
@@ -1785,6 +1790,7 @@ function renderView() {
   const personF  = document.getElementById('personFilter').value;
   const clientF  = document.getElementById('chartClientFilter')?.value || '';
   const projectF = document.getElementById('chartProjectFilter')?.value || '';
+  const itemF    = projectF ? (document.getElementById('chartItemFilter')?.value || '') : '';
 
   let dateSet = new Set();
   let periodLabel = '';
@@ -1831,6 +1837,7 @@ function renderView() {
     && (!personF  || e.person  === personF)
     && (!clientF  || e.client  === clientF)
     && (!projectF || e.project === projectF)
+    && (!itemF    || e.item_no === itemF)
   );
 
   renderBarChart(entries);
@@ -2226,7 +2233,34 @@ function onChartFilterChange() {
   projSel.innerHTML = '<option value="">All projects</option>'
     + projects.map(p => `<option${p===curProj?' selected':''}>${esc(p)}</option>`).join('');
 
+  refreshChartItemFilter();
   renderView();
+}
+
+// Item filter — only active once a project is selected; lists that project's items
+function refreshChartItemFilter() {
+  const itemSel = document.getElementById('chartItemFilter');
+  if (!itemSel) return;
+  const projectF = document.getElementById('chartProjectFilter')?.value || '';
+  const curItem  = itemSel.value;
+
+  if (!projectF) {
+    itemSel.innerHTML = '<option value="">All items</option>';
+    itemSel.disabled  = true;
+    itemSel.title     = 'Select a project to filter by item';
+    return;
+  }
+
+  const items = [...new Set(
+    allEntries
+      .filter(e => e.project === projectF)
+      .map(e => e.item_no).filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+  itemSel.innerHTML = '<option value="">All items</option>'
+    + items.map(it => `<option${it===curItem?' selected':''}>${esc(it)}</option>`).join('');
+  itemSel.disabled = false;
+  itemSel.title    = '';
 }
 
 // ─────────────────────────────────────────────────────────
@@ -2239,6 +2273,7 @@ function _getCurrentChartEntries() {
   const personF  = document.getElementById('personFilter').value;
   const clientF  = document.getElementById('chartClientFilter')?.value || '';
   const projectF = document.getElementById('chartProjectFilter')?.value || '';
+  const itemF    = projectF ? (document.getElementById('chartItemFilter')?.value || '') : '';
 
   let dateSet = new Set();
   if (viewMode === 'week') {
@@ -2268,6 +2303,7 @@ function _getCurrentChartEntries() {
     && (!personF  || e.person  === personF)
     && (!clientF  || e.client  === clientF)
     && (!projectF || e.project === projectF)
+    && (!itemF    || e.item_no === itemF)
   );
 }
 
@@ -2295,6 +2331,8 @@ function updateExportPreview() {
   if (personF)  filterParts.push(personF);
   if (clientF)  filterParts.push(clientF);
   if (projectF) filterParts.push(projectF);
+  const itemF = projectF ? (document.getElementById('chartItemFilter')?.value || '') : '';
+  if (itemF)    filterParts.push(itemF);
   const filterStr = filterParts.length ? filterParts.join(' · ') : 'All';
 
   previewEl.innerHTML = `
