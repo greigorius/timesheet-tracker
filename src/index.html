@@ -527,7 +527,7 @@ td.dim{color:var(--muted)}
           </div>
         </div>
         <div class="file-list" id="fileList">
-          <div class="empty" style="padding:16px">Click "Scan Inbox" to check the Dropbox inbox for files.</div>
+          <div class="empty" style="padding:16px">Loading Inbox and Needs Review files…</div>
         </div>
       </div>
 
@@ -2846,6 +2846,9 @@ loadCfg();
 assignColors();
 loadData();
 updateNavBtns();
+// Populate the import pipeline (Inbox + Needs Review) on open, so the queue
+// is visible without pressing Scan. The Scan button still re-lists on demand.
+scanInbox();
 </script>
 </body>
 </html>
