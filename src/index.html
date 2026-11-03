@@ -524,8 +524,8 @@ td.dim{color:var(--muted)}
             <button class="pill-btn" id="selAllChkBtn" onclick="toggleSelectAllForCheck()" style="display:none">Select all</button>
             <button class="pill-btn" id="checkSelBtn" onclick="checkSelectedFiles()" style="display:none" disabled>Check selected</button>
             <button class="pill-btn" id="addAllBtn" onclick="addAllToQueue()" style="display:none">Add all</button>
-            <button class="scan-inline-btn" onclick="scanInbox()" id="scanBtn">
-              <span class="shb-icon">↻</span>Scan Inbox
+            <button class="scan-inline-btn" onclick="scanInbox()" id="scanBtn" title="Reload the Inbox and Needs Review lists from Dropbox">
+              <span class="shb-icon">↻</span>Refresh
             </button>
           </div>
         </div>
@@ -983,11 +983,11 @@ function mapHeaders(hdrs){
 async function scanInbox(){
   const btn=document.getElementById('scanBtn');
   const list=document.getElementById('fileList');
-  btn.disabled=true;btn.innerHTML='<span class="spin"></span> Scanning…';
+  btn.disabled=true;btn.innerHTML='<span class="spin"></span> Refreshing…';
 
   if(!cfg.scanUrl){
     list.innerHTML='<div class="empty" style="padding:16px;color:var(--muted)">No scan webhook configured — add it in ⚙ Settings.</div>';
-    btn.disabled=false;btn.innerHTML='<span class="shb-icon">↻</span>Scan Inbox';
+    btn.disabled=false;btn.innerHTML='<span class="shb-icon">↻</span>Refresh';
     return;
   }
 
@@ -1003,7 +1003,7 @@ async function scanInbox(){
     list.innerHTML='<div class="empty" style="padding:16px;color:var(--red-bright)">Scan error: '+esc(e.message)+'</div>';
   }
 
-  btn.disabled=false;btn.innerHTML='<span class="shb-icon">↻</span>Scan Inbox';
+  btn.disabled=false;btn.innerHTML='<span class="shb-icon">↻</span>Refresh';
 }
 
 let scannedFiles=[];
@@ -1020,13 +1020,25 @@ function renderFileList(raw){
   const reviewArr=(raw&&Array.isArray(raw.needsReview))?raw.needsReview:[];
   const inboxFiles=inboxArr.filter(f=>f&&f.name).map(f=>Object.assign({},f,{folder:'Inbox'}));
   const reviewFiles=reviewArr.filter(f=>f&&f.name).map(f=>Object.assign({},f,{folder:'Needs Review'}));
-  scannedFiles=inboxFiles.concat(reviewFiles);
-  importedFileNames=new Set(); // reset on rescan — Dropbox list is fresh
-  // Every scan re-validates every file live — no cross-scan caching. A cached
-  // "last known" badge was proving misleading (it could show a verdict from
-  // before a file was corrected, moved, or re-checked), so freshness now wins
-  // over speed: what you see after a scan is always this scan's real result.
-  validationResults={};
+  // On refresh, keep a file's check result and tick only if it is the same
+  // file as before (same name AND same Dropbox modified time). A resaved /
+  // corrected file has a new modified time, so its old verdict is dropped and
+  // it shows "Not checked" again — no stale badges. A Dropbox move keeps the
+  // modified time, so a file Scenario C moved to Needs Review keeps its issues.
+  const prevSig={};
+  scannedFiles.forEach(f=>{ prevSig[f.name]=f.modified||''; });
+  const newFiles=inboxFiles.concat(reviewFiles);
+  const keptResults={}, keptSelection=new Set();
+  newFiles.forEach(f=>{
+    const same=Object.prototype.hasOwnProperty.call(prevSig,f.name)&&prevSig[f.name]===(f.modified||'');
+    if(!same) return;
+    if(validationResults[f.name]) keptResults[f.name]=validationResults[f.name];
+    if(checkSelection.has(f.name)) keptSelection.add(f.name);
+  });
+  scannedFiles=newFiles;
+  importedFileNames=new Set(); // reset on refresh — Dropbox list is fresh
+  validationResults=keptResults;
+  checkSelection=keptSelection;
   const addAllBtn=document.getElementById('addAllBtn');
   if(addAllBtn) addAllBtn.style.display=inboxFiles.length?'':'none';
 
@@ -1044,7 +1056,6 @@ function renderFileList(raw){
   // call after the first is fast) and never puts concurrent load on Make.
   // Files are listed only — nothing is checked until the user ticks files and
   // presses "Check selected" (each check costs Make operations).
-  checkSelection=new Set();
 }
 
 // ── Selective validation ──────────────────────────────────────────────────────
