@@ -102,6 +102,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:
 .compat-badge.warn{background:var(--amber-dim);color:var(--amber)}
 .compat-badge.checking{background:var(--blue-dim);color:var(--blue-bright)}
 .compat-badge.err{background:var(--red-dim);color:var(--red-bright)}
+.file-chk{margin:0;cursor:pointer;accent-color:var(--blue);flex-shrink:0}
 
 /* compat detail */
 .compat-detail{margin-top:4px;padding:6px 10px;background:rgba(16,185,129,.05);border:1px solid rgba(16,185,129,.15);border-radius:3px;font-size:11px;color:var(--muted);display:none}
@@ -520,6 +521,8 @@ td.dim{color:var(--muted)}
         <div class="tc-label"><span class="step-num" id="step1num">1</span>Click files to queue</div>
         <div class="sel-all-row" style="justify-content:flex-end">
           <div class="sel-all-right">
+            <button class="pill-btn" id="selAllChkBtn" onclick="toggleSelectAllForCheck()" style="display:none">Select all</button>
+            <button class="pill-btn" id="checkSelBtn" onclick="checkSelectedFiles()" style="display:none" disabled>Check selected</button>
             <button class="pill-btn" id="addAllBtn" onclick="addAllToQueue()" style="display:none">Add all</button>
             <button class="scan-inline-btn" onclick="scanInbox()" id="scanBtn">
               <span class="shb-icon">↻</span>Scan Inbox
@@ -1039,9 +1042,55 @@ function renderFileList(raw){
   // "Validation service still starting up" on every single row. Awaiting each
   // call before starting the next keeps one function instance warm (so every
   // call after the first is fast) and never puts concurrent load on Make.
-  if(cfg.validateUrl){
-    validateFilesSequentially(scannedFiles.filter(f=>!importedFileNames.has(f.name)));
-  }
+  // Files are listed only — nothing is checked until the user ticks files and
+  // presses "Check selected" (each check costs Make operations).
+  checkSelection=new Set();
+}
+
+// ── Selective validation ──────────────────────────────────────────────────────
+let checkSelection=new Set(); // filenames ticked for checking
+let _checking=false;
+
+function toggleCheckSelection(name,on){
+  if(on) checkSelection.add(name); else checkSelection.delete(name);
+  updateCheckControls();
+}
+
+function checkableFiles(){
+  return scannedFiles.filter(f=>!importedFileNames.has(f.name));
+}
+
+function toggleSelectAllForCheck(){
+  const files=checkableFiles();
+  const allOn=files.length&&files.every(f=>checkSelection.has(f.name));
+  checkSelection=allOn?new Set():new Set(files.map(f=>f.name));
+  renderFileListUI();
+}
+
+function updateCheckControls(){
+  const files=checkableFiles();
+  const selBtn=document.getElementById('selAllChkBtn');
+  const chkBtn=document.getElementById('checkSelBtn');
+  if(!selBtn||!chkBtn) return;
+  const show=!!cfg.validateUrl&&files.length>0;
+  selBtn.style.display=show?'':'none';
+  chkBtn.style.display=show?'':'none';
+  const n=files.filter(f=>checkSelection.has(f.name)).length;
+  selBtn.textContent=(files.length&&n===files.length)?'Clear selection':'Select all';
+  chkBtn.disabled=_checking||n===0;
+  chkBtn.textContent=_checking?'Checking…':(n?`Check selected (${n})`:'Check selected');
+}
+
+async function checkSelectedFiles(){
+  if(_checking||!cfg.validateUrl) return;
+  const files=checkableFiles().filter(f=>checkSelection.has(f.name));
+  if(!files.length) return;
+  _checking=true;
+  checkSelection=new Set();
+  files.forEach(f=>{ validationResults[f.name]={state:'checking'}; });
+  renderFileListUI();
+  try{ await validateFilesSequentially(files); }
+  finally{ _checking=false; renderFileListUI(); }
 }
 
 async function validateFilesSequentially(files){
@@ -1131,6 +1180,7 @@ function renderFileListUI(){
   if(!visibleFiles.length){
     const msg=scannedFiles.length?'All files imported — inbox is clear.':'Inbox is currently empty.';
     list.innerHTML='<div class="empty" style="padding:16px;color:var(--muted)">'+msg+'</div>';
+    updateCheckControls();
     return;
   }
   const rowsHtml=scannedFiles.map((f,i)=>{
@@ -1157,7 +1207,7 @@ function renderFileListUI(){
       const bt=unverified?'? Unverified':ok?'✓ Compatible':partial?'⚠ Partial':'✗ Incompatible';
       badge=`<span class="compat-badge ${bc}">${bt}</span>`;
     } else if(!vr){
-      badge=`<span class="compat-badge warn">? Unverified</span>`;
+      badge=`<span class="compat-badge warn" title="Not checked yet — tick it and press Check selected">? Not checked</span>`;
     } else if(vr.state==='checking'){
       badge=`<span class="compat-badge checking"><span class="spin" style="width:8px;height:8px;border-width:1px;margin-right:3px"></span>Checking</span>`;
     } else if(vr.state==='ok'){
@@ -1235,7 +1285,11 @@ function renderFileListUI(){
       ? `<span class="file-meta" style="color:var(--amber)">Resave to Inbox to re-check</span>`
       : `<button class="file-add-btn${inQueue?' added':''}" onclick="event.stopPropagation();${inQueue?'':'addToQueue(scannedFiles['+i+'])'}" ${inQueue?'disabled':''}>${inQueue?'Queued':'+ Queue'}</button>`;
 
+    const chk=cfg.validateUrl
+      ? `<input type="checkbox" class="file-chk" title="Select to check" ${checkSelection.has(f.name)?'checked':''} ${(vr&&vr.state==='checking')?'disabled':''} onclick="event.stopPropagation()" onchange="toggleCheckSelection(scannedFiles[${i}].name,this.checked)">`
+      : '';
     const html=`<div class="file-row${inQueue?' in-queue':''}" onclick="${rowClick}">
+      ${chk}
       <span class="file-name" title="${esc(f.name)}">${esc(f.name)}</span>
       <span class="file-meta">${esc(f.size||'')}${f.size&&f.modified?' · ':''}${esc(f.modified||'')}</span>
       ${badge}
@@ -1256,6 +1310,7 @@ function renderFileListUI(){
     out+=`<div class="sdiv" style="margin:10px 0 4px">⚠ Needs Review</div>`+reviewRows.join('');
   }
   list.innerHTML=out||'<div class="empty" style="padding:16px;color:var(--muted)">No files.</div>';
+  updateCheckControls();
 }
 
 // ─────────────────────────────────────────────────────────
