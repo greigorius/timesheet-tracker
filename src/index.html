@@ -523,7 +523,7 @@ td.dim{color:var(--muted)}
           <div class="sel-all-right">
             <button class="pill-btn" id="selAllChkBtn" onclick="toggleSelectAllForCheck()" style="display:none">Select all</button>
             <button class="pill-btn" id="checkSelBtn" onclick="checkSelectedFiles()" style="display:none" disabled>Check selected</button>
-            <button class="pill-btn" id="addAllBtn" onclick="addAllToQueue()" style="display:none">Add all</button>
+            <button class="pill-btn" id="addAllBtn" onclick="addAllToQueue()" style="display:none" title="Queue every file that has passed its check">Add all checked</button>
             <button class="scan-inline-btn" onclick="scanInbox()" id="scanBtn" title="Reload the Inbox and Needs Review lists from Dropbox">
               <span class="shb-icon">↻</span>Refresh
             </button>
@@ -1039,8 +1039,14 @@ function renderFileList(raw){
   importedFileNames=new Set(); // reset on refresh — Dropbox list is fresh
   validationResults=keptResults;
   checkSelection=keptSelection;
-  const addAllBtn=document.getElementById('addAllBtn');
-  if(addAllBtn) addAllBtn.style.display=inboxFiles.length?'':'none';
+  // A queued file that has been resaved (or vanished) since its check loses its
+  // pass, so take it back out of the queue — it must be checked again.
+  const before=importQueue.length;
+  importQueue=importQueue.filter(q=>q.status!=='pending'||isCheckedClean(scannedFiles.find(f=>f.name===q.name)));
+  if(importQueue.length!==before){
+    renderQueue();
+    toast((before-importQueue.length)+' queued file(s) changed since checking — removed from queue, check again','w');
+  }
 
   renderFileListUI();
   document.getElementById('step1num').className='step-num done';
@@ -1080,6 +1086,12 @@ function toggleSelectAllForCheck(){
 
 function updateCheckControls(){
   const files=checkableFiles();
+  const addAllBtn=document.getElementById('addAllBtn');
+  if(addAllBtn){
+    const nClean=files.filter(f=>isCheckedClean(f)&&!importQueue.find(q=>q.name===f.name)).length;
+    addAllBtn.style.display=nClean?'':'none';
+    addAllBtn.textContent=`Add all checked (${nClean})`;
+  }
   const selBtn=document.getElementById('selAllChkBtn');
   const chkBtn=document.getElementById('checkSelBtn');
   if(!selBtn||!chkBtn) return;
@@ -1101,7 +1113,14 @@ async function checkSelectedFiles(){
   files.forEach(f=>{ validationResults[f.name]={state:'checking'}; });
   renderFileListUI();
   try{ await validateFilesSequentially(files); }
-  finally{ _checking=false; renderFileListUI(); }
+  finally{
+    _checking=false;
+    // A re-check that no longer passes takes the file back out of the queue.
+    const before=importQueue.length;
+    importQueue=importQueue.filter(q=>q.status!=='pending'||isCheckedClean(scannedFiles.find(f=>f.name===q.name)));
+    if(importQueue.length!==before) renderQueue();
+    renderFileListUI();
+  }
 }
 
 async function validateFilesSequentially(files){
@@ -1291,9 +1310,12 @@ function renderFileListUI(){
       detail=`<div class="val-detail" id="vd-${i}">${toolbar}${issueLines.join('')}</div>`;
     }
 
-    const rowClick=(inQueue||inReview)?'':'addToQueue(scannedFiles['+i+'])';
+    const passed=isCheckedClean(f);
+    const rowClick=(inQueue||inReview||!passed)?'':'addToQueue(scannedFiles['+i+'])';
     const actionBtn=inReview
       ? `<span class="file-meta" style="color:var(--amber)">Resave to Inbox to re-check</span>`
+      : (!passed&&!inQueue)
+      ? `<button class="file-add-btn" disabled title="Check this file first — only files that pass the check can be queued">${(vr&&vr.state==='checking')?'Checking…':'Check first'}</button>`
       : `<button class="file-add-btn${inQueue?' added':''}" onclick="event.stopPropagation();${inQueue?'':'addToQueue(scannedFiles['+i+'])'}" ${inQueue?'disabled':''}>${inQueue?'Queued':'+ Queue'}</button>`;
 
     const chk=cfg.validateUrl
@@ -1330,8 +1352,18 @@ function renderFileListUI(){
 let importQueue=[]; // [{name,size,modified,status,detail}]
 let _importing=false;
 
+// A file can only be queued once it has been checked in this session and came
+// back clean (✓ Valid). Unchecked, checking, flagged or errored files are refused.
+function isCheckedClean(file){
+  if(!file) return false;
+  if(!cfg.validateUrl) return true; // no check service configured — nothing to gate on
+  const vr=validationResults[file.name];
+  return !!vr&&vr.state==='ok'&&file.folder!=='Needs Review';
+}
+
 function addToQueue(file){
   if(!file||importQueue.find(q=>q.name===file.name)) return;
+  if(!isCheckedClean(file)){ toast(file.name+': check the file before queueing it','w'); return; }
   importQueue.push({name:file.name,size:file.size||'',modified:file.modified||'',status:'pending',detail:''});
   renderQueue();
   renderFileListUI();
@@ -1339,7 +1371,7 @@ function addToQueue(file){
 }
 
 function addAllToQueue(){
-  scannedFiles.filter(f=>f.folder!=='Needs Review').forEach(f=>{
+  scannedFiles.filter(f=>!importedFileNames.has(f.name)&&isCheckedClean(f)).forEach(f=>{
     if(!importQueue.find(q=>q.name===f.name))
       importQueue.push({name:f.name,size:f.size||'',modified:f.modified||'',status:'pending',detail:''});
   });
