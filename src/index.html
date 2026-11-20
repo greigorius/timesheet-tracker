@@ -321,6 +321,8 @@ td.dim{color:var(--muted)}
 .fd{font-size:11px;color:var(--dim);line-height:1.5}
 .fi{background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:var(--mono);font-size:12px;padding:7px 11px;width:100%;outline:none;transition:border-color .15s}
 .fi:focus{border-color:var(--blue)}
+.fi[readonly]{opacity:.7;cursor:default}
+.fi-srv{font-size:10px;color:var(--green);margin-top:4px;display:none}
 .drw-f{padding:14px 18px;border-top:1px solid var(--border);display:flex;gap:10px}
 .btn-p{flex:1;background:var(--blue);color:white;border:none;border-radius:3px;font-family:var(--mono);font-size:11px;font-weight:500;padding:9px;cursor:pointer;transition:background .15s}
 .btn-p:hover{background:#2563EB}
@@ -739,21 +741,25 @@ td.dim{color:var(--muted)}
       <div class="fl">Make.com — Scan Inbox Webhook</div>
       <div class="fd">Webhook URL for Scenario A step 1: lists files in Dropbox /Inbox/ and returns their names + a header sample.</div>
       <input class="fi" type="url" id="cfgScan" placeholder="https://hook.eu1.make.com/scan/...">
+      <div class="fi-srv" id="cfgScanSrv">Shared setting — set on the server (Netlify), same for every browser.</div>
     </div>
     <div class="fg">
       <div class="fl">Make.com — Write to Notion Webhook</div>
       <div class="fd">Webhook URL for Scenario A full run: accepts a list of filenames, processes and writes to Notion.</div>
       <input class="fi" type="url" id="cfgWrite" placeholder="https://hook.eu1.make.com/write/...">
+      <div class="fi-srv" id="cfgWriteSrv">Shared setting — set on the server (Netlify), same for every browser.</div>
     </div>
     <div class="fg">
       <div class="fl">Make.com — Pre-validate Webhook</div>
       <div class="fd">Optional. Scenario C webhook URL — validates files at scan time (checks blanks, date format, and Notion lookups) before import.</div>
       <input class="fi" type="url" id="cfgValidate" placeholder="https://hook.eu1.make.com/validate/...">
+      <div class="fi-srv" id="cfgValidateSrv">Shared setting — set on the server (Netlify), same for every browser.</div>
     </div>
     <div class="fg">
       <div class="fl">API Proxy URL</div>
       <div class="fd">Server-side proxy for Notion reads. Defaults to the built-in Netlify function — only change if self-hosting elsewhere.</div>
       <input class="fi" type="url" id="cfgProxy" placeholder="/.netlify/functions/notion-proxy">
+      <div class="fi-srv" id="cfgProxySrv">Shared setting — set on the server (Netlify), same for every browser.</div>
     </div>
   </div>
   <div class="drw-f">
@@ -773,6 +779,39 @@ let cfg = {
   scanUrl:'', writeUrl:'', validateUrl:'',
   proxyUrl: DEFAULT_PROXY
 };
+// Shared settings served by the config function (Netlify environment variables).
+// Any field set there wins over this browser's saved value, so every browser
+// uses the same links. Fields not set on the server fall back to the browser.
+const SERVER_FIELDS={scanUrl:'cfgScan',writeUrl:'cfgWrite',validateUrl:'cfgValidate',proxyUrl:'cfgProxy'};
+let serverCfg={};
+async function loadServerCfg(){
+  try{
+    const r=await fetch('/.netlify/functions/config',{cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const j=await r.json();
+    serverCfg={};
+    Object.keys(SERVER_FIELDS).forEach(k=>{ if(typeof j[k]==='string'&&j[k].trim()) serverCfg[k]=j[k].trim(); });
+  }catch(e){
+    serverCfg={}; // offline / local file — keep using this browser's settings
+  }
+  Object.entries(SERVER_FIELDS).forEach(([k,id])=>{
+    const el=document.getElementById(id), note=document.getElementById(id+'Srv');
+    const locked=!!serverCfg[k];
+    if(locked){ cfg[k]=serverCfg[k]; if(el) el.value=serverCfg[k]; }
+    if(el) el.readOnly=locked;
+    if(note) note.style.display=locked?'block':'none';
+  });
+  updateConnState();
+}
+
+// Save this browser's own settings (column widths, and any link not set on the
+// server). Shared links are never copied into browser storage.
+function saveLocalCfg(){
+  const local=Object.assign({},cfg);
+  Object.keys(serverCfg).forEach(k=>delete local[k]);
+  try{ localStorage.setItem('adl-ts-cfg',JSON.stringify(local)); }catch(e){}
+}
+
 function loadCfg(){
   const s=localStorage.getItem('adl-ts-cfg');
   if(s){try{cfg=Object.assign(cfg,JSON.parse(s))}catch(e){}}
@@ -836,7 +875,7 @@ function applyColWidths(){
         const w = parseInt(getComputedStyle(c).width);
         return isNaN(w)||w<5 ? null : w;
       });
-      localStorage.setItem('adl-ts-cfg', JSON.stringify(cfg));
+      saveLocalCfg();
     }
   });
 })();
@@ -845,7 +884,8 @@ function saveSettings(){
   cfg.writeUrl    = document.getElementById('cfgWrite').value.trim();
   cfg.validateUrl = document.getElementById('cfgValidate').value.trim();
   cfg.proxyUrl    = document.getElementById('cfgProxy').value.trim() || DEFAULT_PROXY;
-  localStorage.setItem('adl-ts-cfg',JSON.stringify(cfg));
+  Object.assign(cfg,serverCfg); // server values always win
+  saveLocalCfg();
   updateConnState(); closeSettings();
   toast('Settings saved','s');
   loadData();
@@ -2942,11 +2982,10 @@ function hexAlpha(hex,alpha){
 // ─────────────────────────────────────────────────────────
 loadCfg();
 assignColors();
-loadData();
 updateNavBtns();
-// Populate the import pipeline (Inbox + Needs Review) on open, so the queue
-// is visible without pressing Scan. The Scan button still re-lists on demand.
-scanInbox();
+// Fetch the shared settings first, then load data and list the Inbox and
+// Needs Review files with the same links every browser uses.
+loadServerCfg().finally(()=>{ loadData(); scanInbox(); });
 </script>
 </body>
 </html>
